@@ -12,8 +12,8 @@ android {
         applicationId = "com.x2tora.torabox"
         minSdk = 24
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.1.1"
+        versionCode = 4
+        versionName = "2.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -89,6 +89,8 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
     implementation(libs.mlkit.barcode.scanning)
+    implementation(libs.androidx.biometric)
+    implementation(libs.androidx.webkit)
 
     // 100% Miuix UI System (Zero Material3/Material dependencies)
     implementation(libs.miuix.ui)

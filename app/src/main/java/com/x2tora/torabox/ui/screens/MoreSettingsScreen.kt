@@ -36,9 +36,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.x2tora.torabox.BuildConfig
 import com.x2tora.torabox.model.NavBarStyle
+import com.x2tora.torabox.model.SwipeActionOption
 import com.x2tora.torabox.model.ThemeColorStyle
 import com.x2tora.torabox.model.ThemeOption
 import com.x2tora.torabox.model.ToraBoxDataState
+import com.x2tora.torabox.notification.ToraBoxNotificationListenerService
+import com.x2tora.torabox.security.BiometricAuthHelper
 import com.x2tora.torabox.ui.components.AppUpdateUiState
 import com.x2tora.torabox.ui.components.ConfirmActionDialog
 import com.x2tora.torabox.ui.components.MiuixColorPickerDialog
@@ -56,6 +59,7 @@ import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Backup
 import top.yukonga.miuix.kmp.icon.extended.Copy
+import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.icon.extended.Favorites
 import top.yukonga.miuix.kmp.icon.extended.Import
 import top.yukonga.miuix.kmp.icon.extended.Info
@@ -65,6 +69,7 @@ import top.yukonga.miuix.kmp.icon.extended.Lock
 import top.yukonga.miuix.kmp.icon.extended.Paste
 import top.yukonga.miuix.kmp.icon.extended.Refresh
 import top.yukonga.miuix.kmp.icon.extended.Reset
+import top.yukonga.miuix.kmp.icon.extended.Scan
 import top.yukonga.miuix.kmp.icon.extended.ScreenMirroring
 import top.yukonga.miuix.kmp.icon.extended.Store
 import top.yukonga.miuix.kmp.icon.extended.Theme
@@ -93,6 +98,14 @@ fun MoreSettingsScreen(
     onUpdateAutoDetectClipboard: (Boolean) -> Unit,
     onUpdateAutoArchiveDays: (Int) -> Unit = {},
     onUpdateBackgroundSync: (Boolean, Int) -> Unit = { _, _ -> },
+    onUpdateAutoCaptureNotifications: (Boolean) -> Unit = {},
+    onUpdateAutoCaptureRegisterImmediately: (Boolean) -> Unit = {},
+    onUpdateQuietHours: (Boolean, Int, Int) -> Unit = { _, _, _ -> },
+    onUpdateNotifyAnomalies: (Boolean) -> Unit = {},
+    onUpdatePersonalCustomsCode: (String) -> Unit = {},
+    onUpdateBiometricLock: (Boolean) -> Unit = {},
+    onUpdateSwipeActions: (SwipeActionOption, SwipeActionOption) -> Unit = { _, _ -> },
+    onUpdateDoorLockHint: (String) -> Unit = {},
     onUpdateSweetTrackerApiKey: (String) -> Unit,
     onUpdateCustomTrackerEndpoint: (String) -> Unit,
     onLoadSampleShipments: () -> Unit,
@@ -114,6 +127,8 @@ fun MoreSettingsScreen(
     var showPasteRestoreDialog by remember { mutableStateOf(false) }
     var pendingImportBackup by remember { mutableStateOf<Pair<String, ToraBoxDataState>?>(null) }
     var showResetConfirm by remember { mutableStateOf(false) }
+    var showPcccDialog by remember { mutableStateOf(false) }
+    var showDoorLockDialog by remember { mutableStateOf(false) }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -364,6 +379,133 @@ fun MoreSettingsScreen(
             }
 
             item {
+                SmallTitle(text = "알림 자동 수집 · 스마트 알림")
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    val listenerGranted = ToraBoxNotificationListenerService.isEnabled(context)
+                    SwitchPreference(
+                        title = "카톡·쇼핑몰 알림 자동 수집",
+                        summary = if (listenerGranted) {
+                            "앱을 열지 않아도 알림에서 송장을 자동 추출합니다"
+                        } else {
+                            "권한 허용 필요 · 탭하여 시스템 알림 접근 설정 열기"
+                        },
+                        checked = state.settings.autoCaptureNotificationsEnabled && listenerGranted,
+                        onCheckedChange = { enable ->
+                            if (enable && !ToraBoxNotificationListenerService.isEnabled(context)) {
+                                onUpdateAutoCaptureNotifications(true)
+                                ToraBoxNotificationListenerService.openSettings(context)
+                                onNotify("시스템 설정에서 '토라박스' 알림 접근을 허용해 주세요")
+                            } else {
+                                onUpdateAutoCaptureNotifications(enable)
+                            }
+                        },
+                        startAction = { PreferenceStartIcon(MiuixIcons.Scan, Color(0xFF10B981)) }
+                    )
+                    AnimatedVisibility(
+                        visible = state.settings.autoCaptureNotificationsEnabled,
+                        enter = ToraBoxMotion.expandEnter(),
+                        exit = ToraBoxMotion.shrinkExit()
+                    ) {
+                        Column {
+                            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                            SwitchPreference(
+                                title = "감지 즉시 자동 등록",
+                                summary = if (state.settings.autoCaptureRegisterImmediately) {
+                                    "켜짐 · 송장 목록에 바로 추가하고 조회합니다"
+                                } else {
+                                    "꺼짐 · 홈 상단 대기함 배너에서 확인 후 등록"
+                                },
+                                checked = state.settings.autoCaptureRegisterImmediately,
+                                onCheckedChange = onUpdateAutoCaptureRegisterImmediately,
+                                startAction = { PreferenceStartIcon(MiuixIcons.Layers, Color(0xFF3482FF)) }
+                            )
+                        }
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    SwitchPreference(
+                        title = "야간 방해금지 (23시 ~ 07시)",
+                        summary = "설정한 야간 시간에는 배송 푸시 알림을 보내지 않습니다",
+                        checked = state.settings.quietHoursEnabled,
+                        onCheckedChange = { enabled ->
+                            onUpdateQuietHours(enabled, state.settings.quietHoursStartHour, state.settings.quietHoursEndHour)
+                        },
+                        startAction = { PreferenceStartIcon(MiuixIcons.Lock, Color(0xFF6366F1)) }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    SwitchPreference(
+                        title = "정체·반송·통관보류 이상 감지 알림",
+                        summary = "48시간 정체, 오분류, 반송, 통관 보류 감지 시 즉시 알림",
+                        checked = state.settings.notifyAnomalies,
+                        onCheckedChange = onUpdateNotifyAnomalies,
+                        startAction = { PreferenceStartIcon(MiuixIcons.Info, Color(0xFFEF4444)) }
+                    )
+                }
+            }
+
+            item {
+                SmallTitle(text = "보안 · 해외직구 · 편의 동작")
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    val maskedPccc = state.settings.personalCustomsCode.let { p ->
+                        if (p.length >= 6) "${p.take(2)}*******${p.takeLast(3)}" else if (p.isNotBlank()) "설정됨" else "미설정 · UNI-PASS 암호화 저장"
+                    }
+                    ArrowPreference(
+                        title = "개인통관고유부호 (PCCC)",
+                        summary = maskedPccc,
+                        onClick = { showPcccDialog = true },
+                        startAction = { PreferenceStartIcon(MiuixIcons.Lock, Color(0xFF0EA5E9)) }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    SwitchPreference(
+                        title = "생체인증 · 기기 잠금",
+                        summary = if (BiometricAuthHelper.canAuthenticate(context)) {
+                            "앱 실행 시 지문·얼굴·기기 비밀번호로 보호합니다"
+                        } else {
+                            "기기에 생체인증 또는 화면 잠금이 설정되어 있지 않습니다"
+                        },
+                        checked = state.settings.biometricLockEnabled,
+                        onCheckedChange = { enable ->
+                            if (enable && !BiometricAuthHelper.canAuthenticate(context)) {
+                                onNotify("먼저 기기 설정에서 화면 잠금이나 생체인증을 등록해 주세요")
+                            } else {
+                                onUpdateBiometricLock(enable)
+                            }
+                        },
+                        startAction = { PreferenceStartIcon(MiuixIcons.Lock, Color(0xFF8B5CF6)) }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    ArrowPreference(
+                        title = "공동현관 · 부재 안내 문구",
+                        summary = state.settings.doorLockHint.ifBlank { "미설정 · 상세 화면 '부재 메시지 복사'에 자동 포함" },
+                        onClick = { showDoorLockDialog = true },
+                        startAction = { PreferenceStartIcon(MiuixIcons.Copy, Color(0xFF10B981)) }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    val swipeOpts = SwipeActionOption.entries
+                    OverlayDropdownPreference(
+                        title = "오른쪽 스와이프 동작",
+                        summary = state.settings.swipeRightAction.label,
+                        items = swipeOpts.map { it.label },
+                        selectedIndex = swipeOpts.indexOf(state.settings.swipeRightAction).coerceAtLeast(0),
+                        onSelectedIndexChange = { idx ->
+                            onUpdateSwipeActions(swipeOpts[idx], state.settings.swipeLeftAction)
+                        },
+                        startAction = { PreferenceStartIcon(MiuixIcons.Layers, Color(0xFF16A34A)) }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    OverlayDropdownPreference(
+                        title = "왼쪽 스와이프 동작",
+                        summary = state.settings.swipeLeftAction.label,
+                        items = swipeOpts.map { it.label },
+                        selectedIndex = swipeOpts.indexOf(state.settings.swipeLeftAction).coerceAtLeast(0),
+                        onSelectedIndexChange = { idx ->
+                            onUpdateSwipeActions(state.settings.swipeRightAction, swipeOpts[idx])
+                        },
+                        startAction = { PreferenceStartIcon(MiuixIcons.Delete, Color(0xFFEF4444)) }
+                    )
+                }
+            }
+
+            item {
                 SmallTitle(text = "백업 및 데이터")
                 Card(modifier = Modifier.fillMaxWidth()) {
                     ArrowPreference(
@@ -576,6 +718,76 @@ fun MoreSettingsScreen(
             onNotify("모든 배송 데이터가 초기화되었습니다")
         }
     )
+
+    var pcccInput by remember(showPcccDialog) { mutableStateOf(state.settings.personalCustomsCode) }
+    OverlayDialog(
+        show = showPcccDialog,
+        title = "개인통관고유부호 (PCCC)",
+        summary = "Android Keystore(AES-GCM)로 기기 내부에만 암호화 보관되며, JSON 백업에는 기본 포함되지 않습니다.",
+        onDismissRequest = { showPcccDialog = false }
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            TextField(
+                value = pcccInput,
+                onValueChange = { pcccInput = it.uppercase() },
+                label = "예: P123456789012",
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                TextButton(
+                    text = "삭제",
+                    onClick = {
+                        onUpdatePersonalCustomsCode("")
+                        showPcccDialog = false
+                        onNotify("개인통관고유부호를 삭제했습니다")
+                    },
+                    modifier = Modifier.weight(0.9f)
+                )
+                TextButton(
+                    text = "저장",
+                    onClick = {
+                        onUpdatePersonalCustomsCode(pcccInput)
+                        showPcccDialog = false
+                        onNotify("개인통관고유부호를 암호화 저장했습니다")
+                    },
+                    colors = ButtonDefaults.textButtonColorsPrimary(),
+                    modifier = Modifier.weight(1.1f)
+                )
+            }
+        }
+    }
+
+    var doorLockInput by remember(showDoorLockDialog) { mutableStateOf(state.settings.doorLockHint) }
+    OverlayDialog(
+        show = showDoorLockDialog,
+        title = "공동현관 · 부재 안내 문구",
+        summary = "상세 화면에서 '부재 메시지 복사'를 누르면 기사님 안내 문구에 자동으로 포함됩니다.",
+        onDismissRequest = { showDoorLockDialog = false }
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            TextField(
+                value = doorLockInput,
+                onValueChange = { doorLockInput = it },
+                label = "예: 공동현관 #1234* / 경비실 앞",
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                TextButton(text = "취소", onClick = { showDoorLockDialog = false }, modifier = Modifier.weight(0.9f))
+                TextButton(
+                    text = "저장",
+                    onClick = {
+                        onUpdateDoorLockHint(doorLockInput)
+                        showDoorLockDialog = false
+                        onNotify("부재 안내 문구를 저장했습니다")
+                    },
+                    colors = ButtonDefaults.textButtonColorsPrimary(),
+                    modifier = Modifier.weight(1.1f)
+                )
+            }
+        }
+    }
 }
 
 @Composable

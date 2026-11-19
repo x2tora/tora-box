@@ -39,10 +39,14 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.x2tora.torabox.domain.KoreanCarrierCatalog
 import com.x2tora.torabox.domain.WaybillDetector
+import com.x2tora.torabox.model.HomeSortOption
+import com.x2tora.torabox.model.PendingCaptureItem
 import com.x2tora.torabox.model.ShipmentFilter
 import com.x2tora.torabox.model.ShipmentRecord
 import com.x2tora.torabox.model.StandardDeliveryPhase
+import com.x2tora.torabox.model.SwipeActionOption
 import com.x2tora.torabox.model.ToraBoxDataState
 import com.x2tora.torabox.ui.components.EmptyDataBanner
 import com.x2tora.torabox.ui.components.MiuixGlassIcon
@@ -68,6 +72,7 @@ import top.yukonga.miuix.kmp.icon.extended.Layers
 import top.yukonga.miuix.kmp.icon.extended.Paste
 import top.yukonga.miuix.kmp.icon.extended.Refresh
 import top.yukonga.miuix.kmp.icon.extended.Scan
+import top.yukonga.miuix.kmp.icon.extended.Search
 import top.yukonga.miuix.kmp.squircle.squircleBackground
 import top.yukonga.miuix.kmp.squircle.squircleClip
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -103,7 +108,11 @@ fun HomeScreen(
     onOpenScanner: () -> Unit = {},
     onArchiveAllDelivered: () -> Unit = {},
     onSwipeArchive: (String) -> Unit = {},
-    onRequestDeleteSingle: (ShipmentRecord) -> Unit = {}
+    onTogglePin: (String) -> Unit = {},
+    onRequestDeleteSingle: (ShipmentRecord) -> Unit = {},
+    onAcceptPendingCapture: (PendingCaptureItem) -> Unit = {},
+    onDismissPendingCapture: (String) -> Unit = {},
+    onChangeSortOption: (HomeSortOption) -> Unit = {}
 ) {
     @Suppress("DEPRECATION")
     val clipboardManager = LocalClipboardManager.current
@@ -111,6 +120,8 @@ fun HomeScreen(
     val wideDualEnabled = LocalWideDualLayoutEnabled.current
 
     var quickInput by remember { mutableStateOf("") }
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedTag by remember { mutableStateOf<String?>(null) }
     var activeFilter by remember { mutableStateOf<ShipmentFilter>(ShipmentFilter.ALL) }
     var pinnedOnly by remember { mutableStateOf(false) }
 
@@ -147,9 +158,28 @@ fun HomeScreen(
     val pinnedCount = remember(activeShipments) {
         activeShipments.count { it.isPinned }
     }
+    val availableTags = remember(activeShipments) {
+        activeShipments.map { it.groupTag.trim() }.filter { it.isNotEmpty() }.distinct()
+    }
+    val sortOption = state.settings.homeSortOption
 
-    val filteredShipments = remember(activeShipments, activeFilter, pinnedOnly) {
-        val baseList = if (pinnedOnly) activeShipments.filter { it.isPinned } else activeShipments
+    val filteredShipments = remember(activeShipments, activeFilter, pinnedOnly, searchQuery, selectedTag, sortOption) {
+        val q = searchQuery.trim()
+        val baseList = activeShipments.filter { item ->
+            val pinOk = !pinnedOnly || item.isPinned
+            val tagOk = selectedTag == null || item.groupTag.trim() == selectedTag
+            val queryOk = if (q.isEmpty()) true else {
+                val carrierName = KoreanCarrierCatalog.findById(item.carrierId)?.nameKo.orEmpty()
+                item.waybillNumber.contains(q, ignoreCase = true) ||
+                    item.itemName.contains(q, ignoreCase = true) ||
+                    item.customTitle.contains(q, ignoreCase = true) ||
+                    item.senderName.contains(q, ignoreCase = true) ||
+                    item.memo.contains(q, ignoreCase = true) ||
+                    item.groupTag.contains(q, ignoreCase = true) ||
+                    carrierName.contains(q, ignoreCase = true)
+            }
+            pinOk && tagOk && queryOk
+        }
         val list = when (activeFilter) {
             ShipmentFilter.ALL -> baseList
             ShipmentFilter.IN_TRANSIT -> baseList.filter {
@@ -167,11 +197,31 @@ fun HomeScreen(
                 it.currentPhase == StandardDeliveryPhase.DELIVERED
             }
         }
-        list.sortedWith(
-            compareByDescending<ShipmentRecord> { it.isPinned }
-                .thenBy { it.currentPhase == StandardDeliveryPhase.DELIVERED }
-                .thenByDescending { maxOf(it.lastUpdatedEpochMs, it.createdAtEpochMs) }
-        )
+        val baseComparator = compareByDescending<ShipmentRecord> { it.isPinned }
+        when (sortOption) {
+            HomeSortOption.LATEST -> list.sortedWith(
+                baseComparator
+                    .thenBy { it.currentPhase == StandardDeliveryPhase.DELIVERED }
+                    .thenByDescending { maxOf(it.lastUpdatedEpochMs, it.createdAtEpochMs) }
+            )
+            HomeSortOption.OUT_FOR_DELIVERY_FIRST -> list.sortedWith(
+                baseComparator
+                    .thenByDescending { it.currentPhase == StandardDeliveryPhase.OUT_FOR_DELIVERY }
+                    .thenBy { it.currentPhase == StandardDeliveryPhase.DELIVERED }
+                    .thenByDescending { maxOf(it.lastUpdatedEpochMs, it.createdAtEpochMs) }
+            )
+            HomeSortOption.ETA_SOONEST -> list.sortedWith(
+                baseComparator
+                    .thenByDescending { it.currentPhase.stepIndex.takeIf { idx -> idx <= 5 } ?: -1 }
+                    .thenByDescending { maxOf(it.lastUpdatedEpochMs, it.createdAtEpochMs) }
+            )
+            HomeSortOption.NAME -> list.sortedWith(
+                baseComparator.thenBy {
+                    val carrierShort = KoreanCarrierCatalog.findById(it.carrierId)?.shortName ?: it.carrierId
+                    it.displayTitle(carrierShort)
+                }
+            )
+        }
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -242,6 +292,63 @@ fun HomeScreen(
                                 Icon(
                                     imageVector = MiuixIcons.Clear,
                                     contentDescription = "닫기",
+                                    tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            val latestPending = state.pendingCaptures.firstOrNull()
+            if (latestPending != null) {
+                item(key = "pending_capture_banner") {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        cornerRadius = 18.dp,
+                        insideMargin = PaddingValues(14.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            MiuixGlassIcon(
+                                icon = MiuixIcons.Scan,
+                                contentDescription = null,
+                                accentColor = Color(0xFF10B981),
+                                size = 38.dp,
+                                iconSize = 18.dp
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "${latestPending.sourceAppLabel} 알림 송장 (${state.pendingCaptures.size}건)",
+                                    style = MiuixTheme.textStyles.footnote1.copy(fontWeight = FontWeight.SemiBold),
+                                    color = Color(0xFF10B981)
+                                )
+                                Text(
+                                    text = listOf(latestPending.itemNameHint, latestPending.waybillNumber)
+                                        .filter { it.isNotBlank() }
+                                        .joinToString(" · "),
+                                    style = MiuixTheme.textStyles.body2.copy(fontWeight = FontWeight.Bold),
+                                    color = MiuixTheme.colorScheme.onSurface,
+                                    maxLines = 1
+                                )
+                            }
+                            SquirclePillBadge(
+                                text = "등록",
+                                backgroundColor = Color(0xFF10B981),
+                                contentColor = Color.White,
+                                onClick = { onAcceptPendingCapture(latestPending) }
+                            )
+                            IconButton(
+                                onClick = { onDismissPendingCapture(latestPending.id) },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    imageVector = MiuixIcons.Clear,
+                                    contentDescription = "무시",
                                     tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
                                     modifier = Modifier.size(16.dp)
                                 )
@@ -481,34 +588,82 @@ fun HomeScreen(
                 }
             }
 
-            if (activeShipments.isNotEmpty() && (pinnedCount > 0 || deliveredCount > 0) && !isSelectionMode) {
-                item(key = "quick_filter_row") {
-                    LazyRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        if (pinnedCount > 0) {
-                            item(key = "filter_pinned") {
+            if (activeShipments.isNotEmpty() && (pinnedCount > 0 || deliveredCount > 0 || availableTags.isNotEmpty() || activeShipments.size >= 2) && !isSelectionMode) {
+                item(key = "home_search_and_tags") {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (activeShipments.size >= 2 || searchQuery.isNotEmpty()) {
+                            TextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                label = "내 배송 검색 (물품명·송장·보낸이·태그)",
+                                singleLine = true,
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = MiuixIcons.Search,
+                                        contentDescription = null,
+                                        modifier = Modifier.padding(start = 12.dp).size(18.dp),
+                                        tint = MiuixTheme.colorScheme.onSurfaceVariantActions
+                                    )
+                                },
+                                trailingIcon = {
+                                    if (searchQuery.isNotEmpty()) {
+                                        IconButton(onClick = { searchQuery = "" }) {
+                                            Icon(imageVector = MiuixIcons.Clear, contentDescription = "지우기", modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                        LazyRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            item(key = "sort_cycle") {
+                                val nextSort = HomeSortOption.entries[(sortOption.ordinal + 1) % HomeSortOption.entries.size]
                                 SquirclePillBadge(
-                                    text = if (pinnedOnly) "고정됨 ${pinnedCount} · 해제" else "고정됨 ${pinnedCount}",
-                                    backgroundColor = if (pinnedOnly) {
-                                        MiuixTheme.colorScheme.primary
-                                    } else MiuixTheme.colorScheme.surfaceContainerHigh,
-                                    contentColor = if (pinnedOnly) {
-                                        MiuixTheme.colorScheme.onPrimary
-                                    } else MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                    onClick = { pinnedOnly = !pinnedOnly }
+                                    text = "정렬: ${sortOption.label}",
+                                    backgroundColor = MiuixTheme.colorScheme.surfaceContainerHigh,
+                                    contentColor = MiuixTheme.colorScheme.onSurface,
+                                    onClick = { onChangeSortOption(nextSort) }
                                 )
                             }
-                        }
-                        if (deliveredCount > 0) {
-                            item(key = "archive_all_delivered") {
+                            if (pinnedCount > 0) {
+                                item(key = "filter_pinned") {
+                                    SquirclePillBadge(
+                                        text = if (pinnedOnly) "고정됨 ${pinnedCount} · 해제" else "고정됨 ${pinnedCount}",
+                                        backgroundColor = if (pinnedOnly) {
+                                            MiuixTheme.colorScheme.primary
+                                        } else MiuixTheme.colorScheme.surfaceContainerHigh,
+                                        contentColor = if (pinnedOnly) {
+                                            MiuixTheme.colorScheme.onPrimary
+                                        } else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                        onClick = { pinnedOnly = !pinnedOnly }
+                                    )
+                                }
+                            }
+                            items(availableTags, key = { "tag_$it" }) { tag ->
+                                val tagSelected = selectedTag == tag
                                 SquirclePillBadge(
-                                    text = "배송완료 ${deliveredCount}건 한 번에 보관",
-                                    backgroundColor = Color(0xFF16A34A).copy(alpha = 0.14f),
-                                    contentColor = Color(0xFF16A34A),
-                                    onClick = onArchiveAllDelivered
+                                    text = "#$tag",
+                                    backgroundColor = if (tagSelected) {
+                                        MiuixTheme.colorScheme.primary
+                                    } else MiuixTheme.colorScheme.surfaceContainerHigh,
+                                    contentColor = if (tagSelected) {
+                                        MiuixTheme.colorScheme.onPrimary
+                                    } else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    onClick = { selectedTag = if (tagSelected) null else tag }
                                 )
+                            }
+                            if (deliveredCount > 0) {
+                                item(key = "archive_all_delivered") {
+                                    SquirclePillBadge(
+                                        text = "배송완료 ${deliveredCount}건 한 번에 보관",
+                                        backgroundColor = Color(0xFF16A34A).copy(alpha = 0.14f),
+                                        contentColor = Color(0xFF16A34A),
+                                        onClick = onArchiveAllDelivered
+                                    )
+                                }
                             }
                         }
                     }
@@ -587,10 +742,26 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         pair.forEach { item ->
+                            val rightOpt = state.settings.swipeRightAction
+                            val leftOpt = state.settings.swipeLeftAction
                             SwipeableShipmentCard(
                                 enabled = !isSelectionMode,
-                                onSwipeRight = { onSwipeArchive(item.id) },
-                                onSwipeLeft = { onRequestDeleteSingle(item) },
+                                rightActionLabel = rightOpt.label,
+                                leftActionLabel = leftOpt.label,
+                                onSwipeRight = {
+                                    when (rightOpt) {
+                                        SwipeActionOption.ARCHIVE -> onSwipeArchive(item.id)
+                                        SwipeActionOption.PIN -> onTogglePin(item.id)
+                                        SwipeActionOption.DELETE -> onRequestDeleteSingle(item)
+                                    }
+                                },
+                                onSwipeLeft = {
+                                    when (leftOpt) {
+                                        SwipeActionOption.ARCHIVE -> onSwipeArchive(item.id)
+                                        SwipeActionOption.PIN -> onTogglePin(item.id)
+                                        SwipeActionOption.DELETE -> onRequestDeleteSingle(item)
+                                    }
+                                },
                                 modifier = Modifier.weight(1f)
                             ) {
                                 ShipmentSummaryCard(
@@ -615,10 +786,26 @@ fun HomeScreen(
                 }
             } else {
                 items(filteredShipments, key = { it.id }) { shipment ->
+                    val rightOpt = state.settings.swipeRightAction
+                    val leftOpt = state.settings.swipeLeftAction
                     SwipeableShipmentCard(
                         enabled = !isSelectionMode,
-                        onSwipeRight = { onSwipeArchive(shipment.id) },
-                        onSwipeLeft = { onRequestDeleteSingle(shipment) },
+                        rightActionLabel = rightOpt.label,
+                        leftActionLabel = leftOpt.label,
+                        onSwipeRight = {
+                            when (rightOpt) {
+                                SwipeActionOption.ARCHIVE -> onSwipeArchive(shipment.id)
+                                SwipeActionOption.PIN -> onTogglePin(shipment.id)
+                                SwipeActionOption.DELETE -> onRequestDeleteSingle(shipment)
+                            }
+                        },
+                        onSwipeLeft = {
+                            when (leftOpt) {
+                                SwipeActionOption.ARCHIVE -> onSwipeArchive(shipment.id)
+                                SwipeActionOption.PIN -> onTogglePin(shipment.id)
+                                SwipeActionOption.DELETE -> onRequestDeleteSingle(shipment)
+                            }
+                        },
                         modifier = Modifier.animateItem()
                     ) {
                         ShipmentSummaryCard(

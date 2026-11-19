@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="scan_barcode"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_scan_short"
+        android:shortcutLongLabel="@string/shortcut_scan_long">
+        <intent
+            android:action="com.x2tora.torabox.ACTION_SCAN_BARCODE"
+            android:targetPackage="com.x2tora.torabox"
+            android:targetClass="com.x2tora.torabox.MainActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="add_manual"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_add_short"
+        android:shortcutLongLabel="@string/shortcut_add_long">
+        <intent
+            android:action="com.x2tora.torabox.ACTION_ADD_SHIPMENT"
+            android:targetPackage="com.x2tora.torabox"
+            android:targetClass="com.x2tora.torabox.MainActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="clipboard_track"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_clipboard_short"
+        android:shortcutLongLabel="@string/shortcut_clipboard_long">
+        <intent
+            android:action="com.x2tora.torabox.ACTION_CLIPBOARD_TRACK"
+            android:targetPackage="com.x2tora.torabox"
+            android:targetClass="com.x2tora.torabox.MainActivity" />
+    </shortcut>
+</shortcuts>

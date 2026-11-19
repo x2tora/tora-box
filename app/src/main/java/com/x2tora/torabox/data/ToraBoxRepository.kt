@@ -7,6 +7,7 @@ import com.x2tora.torabox.model.ShipmentRecord
 import com.x2tora.torabox.model.StandardDeliveryPhase
 import com.x2tora.torabox.model.ToraBoxDataState
 import com.x2tora.torabox.model.TrackingEvent
+import com.x2tora.torabox.security.SecureVault
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -14,7 +15,8 @@ import java.util.UUID
 
 class ToraBoxRepository(context: Context) {
 
-    private val dataFile = File(context.filesDir, "torabox_data.json")
+    private val appContext = context.applicationContext
+    private val dataFile = File(appContext.filesDir, "torabox_data.json")
     private val json = Json {
         prettyPrint = true
         ignoreUnknownKeys = true
@@ -22,25 +24,68 @@ class ToraBoxRepository(context: Context) {
     }
 
     fun load(): ToraBoxDataState {
-        if (!dataFile.exists()) return ToraBoxDataState()
-        return runCatching {
-            val raw = dataFile.readText(Charsets.UTF_8)
-            json.decodeFromString<ToraBoxDataState>(raw)
-        }.getOrDefault(ToraBoxDataState())
+        val base = if (!dataFile.exists()) {
+            ToraBoxDataState()
+        } else {
+            runCatching {
+                val raw = dataFile.readText(Charsets.UTF_8)
+                json.decodeFromString<ToraBoxDataState>(raw)
+            }.getOrDefault(ToraBoxDataState())
+        }
+        // Hydrate encrypted secrets from Android Keystore; migrate if legacy plaintext exists
+        val vaultKey = SecureVault.loadSweetTrackerApiKey(appContext)
+        val vaultPccc = SecureVault.loadPersonalCustomsCode(appContext)
+        val effectiveKey = vaultKey.ifBlank {
+            base.settings.sweetTrackerApiKey.also {
+                if (it.isNotBlank()) SecureVault.saveSweetTrackerApiKey(appContext, it)
+            }
+        }
+        val effectivePccc = vaultPccc.ifBlank {
+            base.settings.personalCustomsCode.also {
+                if (it.isNotBlank()) SecureVault.savePersonalCustomsCode(appContext, it)
+            }
+        }
+        return base.copy(
+            settings = base.settings.copy(
+                sweetTrackerApiKey = effectiveKey,
+                personalCustomsCode = effectivePccc
+            )
+        )
     }
 
     fun save(state: ToraBoxDataState) {
+        SecureVault.saveSweetTrackerApiKey(appContext, state.settings.sweetTrackerApiKey)
+        SecureVault.savePersonalCustomsCode(appContext, state.settings.personalCustomsCode)
+        val sanitized = state.copy(
+            settings = state.settings.copy(
+                sweetTrackerApiKey = "",
+                personalCustomsCode = ""
+            )
+        )
         runCatching {
+            val encoded = json.encodeToString(sanitized)
             val tmp = File(dataFile.parentFile, "torabox_data.json.tmp")
-            tmp.writeText(json.encodeToString(state), Charsets.UTF_8)
+            tmp.writeText(encoded, Charsets.UTF_8)
             if (!tmp.renameTo(dataFile)) {
-                dataFile.writeText(json.encodeToString(state), Charsets.UTF_8)
+                dataFile.writeText(encoded, Charsets.UTF_8)
                 tmp.delete()
             }
         }
     }
 
-    fun exportJson(state: ToraBoxDataState): String = json.encodeToString(state)
+    fun exportJson(state: ToraBoxDataState, includeSecrets: Boolean = false): String {
+        val target = if (includeSecrets) {
+            state
+        } else {
+            state.copy(
+                settings = state.settings.copy(
+                    sweetTrackerApiKey = "",
+                    personalCustomsCode = ""
+                )
+            )
+        }
+        return json.encodeToString(target)
+    }
 
     fun parseBackupJson(raw: String): Result<ToraBoxDataState> = runCatching {
         val cleaned = raw.trim()

@@ -2,4 +2,12 @@
 <resources>
     <string name="app_name">토라박스</string>
     <string name="widget_description">진행 중인 택배 배송 현황과 오늘 도착 예정 건수를 한눈에 확인합니다.</string>
+    <string name="compact_widget_description">진행 중·오늘 출발 택배 건수를 한눈에 보는 컴팩트 배지입니다.</string>
+    <string name="focus_widget_description">고정된 최우선 택배의 진행 단계와 최근 위치를 집중 표시합니다.</string>
+    <string name="shortcut_scan_short">바코드 스캔</string>
+    <string name="shortcut_scan_long">운송장 바코드·QR 스캔</string>
+    <string name="shortcut_add_short">송장 등록</string>
+    <string name="shortcut_add_long">새 운송장 직접 등록</string>
+    <string name="shortcut_clipboard_short">클립보드 조회</string>
+    <string name="shortcut_clipboard_long">클립보드 송장 즉시 조회</string>
 </resources>

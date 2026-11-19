@@ -45,3 +45,8 @@
 # Glance AppWidget & ActionCallback
 -keep class com.x2tora.torabox.widget.** { *; }
 -keep class * extends androidx.glance.appwidget.action.ActionCallback { <init>(); }
+
+# NotificationListenerService & Security
+-keep class com.x2tora.torabox.notification.ToraBoxNotificationListenerService { *; }
+-keep class com.x2tora.torabox.security.** { *; }
+-dontwarn androidx.biometric.**

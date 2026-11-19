@@ -2,6 +2,8 @@ package com.x2tora.torabox.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -97,7 +99,11 @@ fun ShipmentDetailScreen(
     onTogglePin: (String) -> Unit,
     onToggleArchive: (String) -> Unit,
     onDelete: (String) -> Unit,
-    onNotify: (String) -> Unit
+    onNotify: (String) -> Unit,
+    doorLockHint: String = "",
+    onUpdateGroupTag: (String, String) -> Unit = { _, _ -> },
+    onAddPhotoUri: (String, String) -> Unit = { _, _ -> },
+    onRemovePhotoUri: (String, String) -> Unit = { _, _ -> }
 ) {
     if (shipment == null) {
         LaunchedEffectOnMissing(onBack)
@@ -119,6 +125,21 @@ fun ShipmentDetailScreen(
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
     var didNavigateBack by remember { mutableStateOf(false) }
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            onAddPhotoUri(shipment.id, uri.toString())
+            onNotify("수령·영수증 사진을 첨부했습니다")
+        }
+    }
     val safeBack: () -> Unit = {
         if (!didNavigateBack) {
             didNavigateBack = true
@@ -250,6 +271,61 @@ fun ShipmentDetailScreen(
                                         )
                                     }
 
+                                    val anomaly = shipment.anomalyType
+                                    if (anomaly != null || shipment.estimatedDeliveryLabel.isNotBlank() || shipment.lastSyncSource.isNotBlank()) {
+                                        FlowRow(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            if (anomaly != null) {
+                                                SquirclePillBadge(
+                                                    text = "${anomaly.badgeText} · ${anomaly.label}",
+                                                    backgroundColor = Color(0xFFDC2626).copy(alpha = 0.14f),
+                                                    contentColor = Color(0xFFDC2626)
+                                                )
+                                            }
+                                            if (shipment.estimatedDeliveryLabel.isNotBlank()) {
+                                                SquirclePillBadge(
+                                                    text = shipment.estimatedDeliveryLabel,
+                                                    backgroundColor = MiuixTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                                    contentColor = MiuixTheme.colorScheme.primary
+                                                )
+                                            }
+                                            if (shipment.lastSyncSource.isNotBlank()) {
+                                                val diag = if (shipment.lastLatencyMs > 0L) {
+                                                    "${shipment.lastSyncSource} · ${shipment.lastLatencyMs}ms"
+                                                } else shipment.lastSyncSource
+                                                SquirclePillBadge(
+                                                    text = diag,
+                                                    backgroundColor = MiuixTheme.colorScheme.surfaceContainerHigh,
+                                                    contentColor = MiuixTheme.colorScheme.onSurfaceVariantSummary
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    // Group tag quick selector
+                                    FlowRow(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        listOf("개인", "가족", "직구", "반품").forEach { tag ->
+                                            val activeTag = shipment.groupTag == tag
+                                            SquirclePillBadge(
+                                                text = "#$tag",
+                                                backgroundColor = if (activeTag) {
+                                                    MiuixTheme.colorScheme.primary
+                                                } else MiuixTheme.colorScheme.surfaceContainerHigh,
+                                                contentColor = if (activeTag) {
+                                                    MiuixTheme.colorScheme.onPrimary
+                                                } else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                                onClick = {
+                                                    onUpdateGroupTag(shipment.id, if (activeTag) "" else tag)
+                                                }
+                                            )
+                                        }
+                                    }
+
                                     if (pipeline.isNotEmpty()) {
                                         HorizontalDivider()
                                         val activeStep = pipeline.getOrNull(shipment.currentCarrierStageIndex.coerceIn(0, pipeline.lastIndex))
@@ -321,6 +397,29 @@ fun ShipmentDetailScreen(
                                             leadingIcon = MiuixIcons.Edit,
                                             onClick = { showEditDialog = true }
                                         )
+                                        SquirclePillBadge(
+                                            text = "부재 메시지 복사",
+                                            backgroundColor = MiuixTheme.colorScheme.surfaceContainerHigh,
+                                            contentColor = MiuixTheme.colorScheme.onSurface,
+                                            leadingIcon = MiuixIcons.Copy,
+                                            onClick = {
+                                                val msg = buildString {
+                                                    append("안녕하세요, 택배 기사님. 부재 중이니 문 앞에 안전하게 놓아주세요. 감사합니다.")
+                                                    if (doorLockHint.isNotBlank()) {
+                                                        append(" (출입 안내: ").append(doorLockHint).append(")")
+                                                    }
+                                                }
+                                                @Suppress("DEPRECATION")
+                                                clipboardManager.setText(AnnotatedString(msg))
+                                                onNotify("부재 요청 문구를 복사했습니다")
+                                            }
+                                        )
+                                        SquirclePillBadge(
+                                            text = if (shipment.photoUris.isEmpty()) "사진 첨부" else "사진 ${shipment.photoUris.size}장",
+                                            backgroundColor = MiuixTheme.colorScheme.surfaceContainerHigh,
+                                            contentColor = MiuixTheme.colorScheme.onSurface,
+                                            onClick = { photoPickerLauncher.launch(arrayOf("image/*")) }
+                                        )
                                         if (carrier != null) {
                                             SquirclePillBadge(
                                                 text = "공식 웹 조회",
@@ -390,6 +489,48 @@ fun ShipmentDetailScreen(
                                     if (shipment.memo.isNotBlank()) {
                                         HorizontalDivider()
                                         MetadataRow("내 메모", shipment.memo)
+                                    }
+                                    if (shipment.photoUris.isNotEmpty()) {
+                                        HorizontalDivider()
+                                        Text(
+                                            text = "첨부 사진 (${shipment.photoUris.size})",
+                                            style = MiuixTheme.textStyles.footnote1.copy(fontWeight = FontWeight.SemiBold),
+                                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary
+                                        )
+                                        FlowRow(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            shipment.photoUris.forEachIndexed { idx, uriStr ->
+                                                SquirclePillBadge(
+                                                    text = "사진 ${idx + 1} 보기",
+                                                    backgroundColor = MiuixTheme.colorScheme.surfaceContainerHigh,
+                                                    contentColor = MiuixTheme.colorScheme.onSurface,
+                                                    onClick = {
+                                                        runCatching {
+                                                            context.startActivity(
+                                                                Intent(Intent.ACTION_VIEW).apply {
+                                                                    setDataAndType(Uri.parse(uriStr), "image/*")
+                                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                                }
+                                                            )
+                                                        }.onFailure {
+                                                            onNotify("사진을 열 수 없어 목록에서 제거했습니다")
+                                                            onRemovePhotoUri(shipment.id, uriStr)
+                                                        }
+                                                    }
+                                                )
+                                                SquirclePillBadge(
+                                                    text = "제거",
+                                                    backgroundColor = Color(0xFFDC2626).copy(alpha = 0.12f),
+                                                    contentColor = Color(0xFFDC2626),
+                                                    onClick = {
+                                                        onRemovePhotoUri(shipment.id, uriStr)
+                                                        onNotify("첨부 사진을 제거했습니다")
+                                                    }
+                                                )
+                                            }
+                                        }
                                     }
                                     if (shipment.lastUpdatedEpochMs > 0L) {
                                         val syncTime = remember(shipment.lastUpdatedEpochMs) {

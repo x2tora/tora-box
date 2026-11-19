@@ -37,7 +37,20 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
             </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
+
+        <service
+            android:name=".notification.ToraBoxNotificationListenerService"
+            android:exported="false"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
 
         <receiver
             android:name=".widget.ToraBoxWidgetReceiver"
@@ -49,6 +62,30 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/torabox_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.ToraBoxCompactWidgetReceiver"
+            android:exported="true"
+            android:label="토라박스 (컴팩트)">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/torabox_compact_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.ToraBoxFocusWidgetReceiver"
+            android:exported="true"
+            android:label="토라박스 (집중형)">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/torabox_focus_widget_info" />
         </receiver>
 
         <provider

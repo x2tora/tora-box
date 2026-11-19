@@ -985,6 +985,38 @@ fun ShipmentSummaryCard(
                 }
             }
 
+            val anomaly = shipment.anomalyType
+            val hasEta = shipment.estimatedDeliveryLabel.isNotBlank()
+            val hasTag = shipment.groupTag.isNotBlank()
+            if (anomaly != null || hasEta || hasTag) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (anomaly != null) {
+                        SquirclePillBadge(
+                            text = anomaly.badgeText,
+                            backgroundColor = Color(0xFFDC2626).copy(alpha = 0.14f),
+                            contentColor = Color(0xFFDC2626)
+                        )
+                    } else if (hasEta) {
+                        SquirclePillBadge(
+                            text = shipment.estimatedDeliveryLabel,
+                            backgroundColor = MiuixTheme.colorScheme.primary.copy(alpha = 0.12f),
+                            contentColor = MiuixTheme.colorScheme.primary
+                        )
+                    }
+                    if (hasTag) {
+                        SquirclePillBadge(
+                            text = "#${shipment.groupTag}",
+                            backgroundColor = MiuixTheme.colorScheme.surfaceContainerHigh,
+                            contentColor = MiuixTheme.colorScheme.onSurfaceVariantSummary
+                        )
+                    }
+                }
+            }
+
             if (pipeline.isNotEmpty()) {
                 CarrierStageStepper(
                     stages = pipeline,

@@ -13,7 +13,10 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.x2tora.torabox.MainActivity
 import com.x2tora.torabox.R
+import com.x2tora.torabox.model.AppSettings
+import com.x2tora.torabox.model.DeliveryAnomalyType
 import com.x2tora.torabox.model.StandardDeliveryPhase
+import java.util.Calendar
 
 data class PhaseChangeNotice(
     val shipmentId: String,
@@ -51,12 +54,37 @@ object NotificationHelper {
         ) == PackageManager.PERMISSION_GRANTED
     }
 
-    fun notifyPhaseChanges(context: Context, changes: List<PhaseChangeNotice>) {
+    fun isInQuietHours(
+        settings: AppSettings,
+        hourOfDay: Int = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+    ): Boolean {
+        if (!settings.quietHoursEnabled) return false
+        val start = settings.quietHoursStartHour.coerceIn(0, 23)
+        val end = settings.quietHoursEndHour.coerceIn(0, 23)
+        return if (start <= end) {
+            hourOfDay in start until end
+        } else {
+            hourOfDay >= start || hourOfDay < end
+        }
+    }
+
+    fun shouldNotifyPhase(settings: AppSettings, phase: StandardDeliveryPhase): Boolean =
+        phase in settings.notifyPhases
+
+    fun notifyPhaseChanges(
+        context: Context,
+        changes: List<PhaseChangeNotice>,
+        settings: AppSettings = AppSettings()
+    ) {
         if (changes.isEmpty() || !hasNotificationPermission(context)) return
+        if (isInQuietHours(settings)) return
+        val filtered = changes.filter { shouldNotifyPhase(settings, it.newPhase) }
+        if (filtered.isEmpty()) return
+
         ensureChannel(context)
         val manager = NotificationManagerCompat.from(context)
 
-        changes.take(5).forEach { notice ->
+        filtered.take(5).forEach { notice ->
             val launchIntent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 putExtra(EXTRA_SHIPMENT_ID, notice.shipmentId)
@@ -88,6 +116,38 @@ object NotificationHelper {
             runCatching {
                 manager.notify(notice.shipmentId.hashCode(), notification)
             }
+        }
+    }
+
+    fun notifyAnomaly(
+        context: Context,
+        shipmentId: String,
+        title: String,
+        anomaly: DeliveryAnomalyType,
+        settings: AppSettings
+    ) {
+        if (!settings.notifyAnomalies || !hasNotificationPermission(context) || isInQuietHours(settings)) return
+        ensureChannel(context)
+        val launchIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra(EXTRA_SHIPMENT_ID, shipmentId)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            (shipmentId + "_anomaly").hashCode(),
+            launchIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("$title · ${anomaly.badgeText}")
+            .setContentText("${anomaly.label} 상태가 감지되었습니다. 상세 내역을 확인하세요.")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+        runCatching {
+            NotificationManagerCompat.from(context).notify((shipmentId + "_anomaly").hashCode(), notification)
         }
     }
 }

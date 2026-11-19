@@ -1,5 +1,7 @@
 package com.x2tora.torabox.domain
 
+import android.content.Context
+import com.x2tora.torabox.model.CarrierCategory
 import com.x2tora.torabox.model.CarrierInfo
 import com.x2tora.torabox.model.StandardDeliveryPhase
 import com.x2tora.torabox.model.TrackingEvent
@@ -31,26 +33,32 @@ object ParcelTrackingEngine {
         carrier: CarrierInfo,
         rawWaybill: String,
         sweetTrackerApiKey: String = "",
-        customTrackerEndpoint: String = "https://apis.tracker.delivery"
+        customTrackerEndpoint: String = "https://apis.tracker.delivery",
+        appContext: Context? = null,
+        personalCustomsCode: String = ""
     ): Result<TrackingResult> = withContext(Dispatchers.IO) {
+        val startedMs = System.currentTimeMillis()
         val waybill = WaybillDetector.normalizeWaybill(rawWaybill)
         if (waybill.isBlank()) {
             return@withContext Result.failure(IllegalArgumentException("송장번호를 입력해 주세요"))
         }
+
+        fun withLatency(res: TrackingResult): TrackingResult =
+            res.copy(latencyMs = (System.currentTimeMillis() - startedMs).coerceAtLeast(1L))
 
         // 1. Optional SweetTracker API (covers all 73+ domestic carriers with item/sender metadata)
         val trimmedKey = sweetTrackerApiKey.trim()
         if (trimmedKey.isNotEmpty() && carrier.sweetTrackerCode.all(Char::isDigit)) {
             val stResult = runCatching { querySweetTracker(carrier, waybill, trimmedKey) }.getOrNull()
             if (stResult != null && (stResult.events.isNotEmpty() || stResult.itemName.isNotBlank())) {
-                return@withContext Result.success(stResult)
+                return@withContext Result.success(withLatency(stResult))
             }
         }
 
         // 2. Direct Korean Carrier Endpoint / Scraper (no API key needed)
         val directResult = runCatching { queryDirectCarrier(carrier, waybill) }.getOrNull()
         if (directResult != null && (directResult.events.isNotEmpty() || directResult.itemName.isNotBlank() || directResult.senderName.isNotBlank())) {
-            return@withContext Result.success(directResult)
+            return@withContext Result.success(withLatency(directResult))
         }
 
         // 3. Universal public tracker.delivery REST endpoint fallback
@@ -61,7 +69,7 @@ object ParcelTrackingEngine {
             }
             val res = fallback.getOrNull()
             if (res != null && res.events.isNotEmpty()) {
-                return@withContext Result.success(res)
+                return@withContext Result.success(withLatency(res))
             }
         }
 
@@ -72,12 +80,34 @@ object ParcelTrackingEngine {
                 val cjRes = runCatching { queryCjLogistics(cjCarrier, waybill) }.getOrNull()
                 if (cjRes != null && (cjRes.events.isNotEmpty() || cjRes.itemName.isNotBlank())) {
                     return@withContext Result.success(
-                        cjRes.copy(
-                            carrierId = carrier.id,
-                            serviceType = cjRes.serviceType.ifBlank { "${carrier.shortName} 연계배송" }
+                        withLatency(
+                            cjRes.copy(
+                                carrierId = carrier.id,
+                                serviceType = cjRes.serviceType.ifBlank { "${carrier.shortName} 연계배송" }
+                            )
                         )
                     )
                 }
+            }
+        }
+
+        // 5. UNI-PASS Korea Customs lookup for international shipments
+        if (carrier.category == CarrierCategory.INTERNATIONAL || carrier.id == "kr.epost.ems") {
+            val customsRes = runCatching {
+                UniPassCustomsClient.queryCustomsProgress(carrier, waybill, personalCustomsCode)
+            }.getOrNull()
+            if (customsRes != null && customsRes.events.isNotEmpty()) {
+                return@withContext Result.success(withLatency(customsRes))
+            }
+        }
+
+        // 6. Offscreen WebView JS-rendered fallback when HTTP endpoints returned empty
+        if (appContext != null) {
+            val webRes = runCatching {
+                HiddenWebViewScraper.fetchTracking(appContext, carrier, waybill)
+            }.getOrNull()
+            if (webRes != null && webRes.events.isNotEmpty()) {
+                return@withContext Result.success(withLatency(webRes))
             }
         }
 
@@ -92,7 +122,9 @@ object ParcelTrackingEngine {
         rawWaybill: String,
         carrierHintId: String? = null,
         sweetTrackerApiKey: String = "",
-        customTrackerEndpoint: String = "https://apis.tracker.delivery"
+        customTrackerEndpoint: String = "https://apis.tracker.delivery",
+        appContext: Context? = null,
+        personalCustomsCode: String = ""
     ): Result<TrackingResult> = coroutineScope {
         val waybill = WaybillDetector.normalizeWaybill(rawWaybill)
         val candidates = WaybillDetector.recommendCarriers(waybill, carrierHintId)
@@ -106,7 +138,14 @@ object ParcelTrackingEngine {
 
         val deferredResults = candidates.map { candidate ->
             async(Dispatchers.IO) {
-                track(candidate, waybill, sweetTrackerApiKey, customTrackerEndpoint).getOrNull()
+                track(
+                    carrier = candidate,
+                    rawWaybill = waybill,
+                    sweetTrackerApiKey = sweetTrackerApiKey,
+                    customTrackerEndpoint = customTrackerEndpoint,
+                    appContext = appContext,
+                    personalCustomsCode = personalCustomsCode
+                ).getOrNull()
             }
         }
         val hits = deferredResults.awaitAll().filterNotNull()

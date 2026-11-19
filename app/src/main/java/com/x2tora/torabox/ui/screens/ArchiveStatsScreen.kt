@@ -1,14 +1,21 @@
 package com.x2tora.torabox.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import com.x2tora.torabox.domain.DeliveryIntelligence
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -151,6 +158,77 @@ fun ArchiveStatsScreen(
                             style = MiuixTheme.textStyles.footnote2.copy(fontFeatureSettings = "tnum"),
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary
                         )
+                    }
+                }
+            }
+
+            if (state.shipments.isNotEmpty()) {
+                item(key = "insights_card") {
+                    val topCarriers = remember(state.shipments) {
+                        state.shipments
+                            .groupBy { it.carrierId }
+                            .entries
+                            .sortedByDescending { it.value.size }
+                            .take(4)
+                    }
+                    val maxCarrierCount = (topCarriers.maxOfOrNull { it.value.size } ?: 1).coerceAtLeast(1)
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        cornerRadius = 20.dp,
+                        insideMargin = PaddingValues(16.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                text = "택배사별 이용 · 평균 배송 속도",
+                                style = MiuixTheme.textStyles.headline2.copy(fontWeight = FontWeight.Bold),
+                                color = MiuixTheme.colorScheme.onSurface
+                            )
+                            topCarriers.forEach { (carrierId, records) ->
+                                val carrier = KoreanCarrierCatalog.findById(carrierId)
+                                val name = carrier?.shortName ?: carrierId
+                                val avgHours = DeliveryIntelligence.computeAverageDeliveryHours(state.shipments, carrierId)
+                                val ratio = (records.size.toFloat() / maxCarrierCount.toFloat()).coerceIn(0.12f, 1f)
+                                val barColor = Color(carrier?.accentColorHex ?: 0xFF3482FF)
+
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            text = name,
+                                            style = MiuixTheme.textStyles.footnote1.copy(fontWeight = FontWeight.SemiBold),
+                                            color = MiuixTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = if (avgHours != null) {
+                                                "${records.size}건 · 평균 ${avgHours.toInt()}시간"
+                                            } else {
+                                                "${records.size}건"
+                                            },
+                                            style = MiuixTheme.textStyles.footnote2.copy(fontFeatureSettings = "tnum"),
+                                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary
+                                        )
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(7.dp)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(MiuixTheme.colorScheme.surfaceContainerHigh)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth(ratio)
+                                                .fillMaxHeight()
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(barColor)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

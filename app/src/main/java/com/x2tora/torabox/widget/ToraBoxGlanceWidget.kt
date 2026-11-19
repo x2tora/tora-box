@@ -236,25 +236,242 @@ class ToraBoxWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = ToraBoxGlanceWidget()
 }
 
+class ToraBoxCompactWidget : GlanceAppWidget() {
+    override suspend fun provideGlance(context: Context, id: GlanceId) {
+        val state = ToraBoxRepository(context).load()
+        val active = state.shipments.filter { !it.isArchived }
+        val inProgress = active.count { it.currentPhase != StandardDeliveryPhase.DELIVERED }
+        val outForDelivery = active.count { it.currentPhase == StandardDeliveryPhase.OUT_FOR_DELIVERY }
+        val anomalyCount = active.count { it.anomalyType != null }
+
+        provideContent {
+            val bgSurface = ColorProvider(day = Color(0xFFF7F8FA), night = Color(0xFF171A21))
+            val textPrimary = ColorProvider(day = Color(0xFF141820), night = Color(0xFFF3F5F8))
+            val textSecondary = ColorProvider(day = Color(0xFF5D6676), night = Color(0xFFA0AAB8))
+            val accentBlue = ColorProvider(day = Color(0xFF2B76FF), night = Color(0xFF5A97FF))
+            val warnRed = ColorProvider(day = Color(0xFFDC2626), night = Color(0xFFF87171))
+            val launchIntent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
+
+            Row(
+                modifier = GlanceModifier
+                    .fillMaxSize()
+                    .background(bgSurface)
+                    .cornerRadius(18.dp)
+                    .clickable(actionStartActivity(launchIntent))
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = GlanceModifier.defaultWeight()) {
+                    Text(
+                        text = "토라박스",
+                        style = TextStyle(color = textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    )
+                    Text(
+                        text = when {
+                            anomalyCount > 0 -> "확인 필요 ${anomalyCount}건"
+                            outForDelivery > 0 -> "오늘 출발 ${outForDelivery}건"
+                            else -> "진행 중 ${inProgress}건"
+                        },
+                        style = TextStyle(
+                            color = when {
+                                anomalyCount > 0 -> warnRed
+                                outForDelivery > 0 -> accentBlue
+                                else -> textSecondary
+                            },
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    )
+                }
+                Text(
+                    text = inProgress.toString(),
+                    style = TextStyle(
+                        color = accentBlue,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+            }
+        }
+    }
+}
+
+class ToraBoxCompactWidgetReceiver : GlanceAppWidgetReceiver() {
+    override val glanceAppWidget: GlanceAppWidget = ToraBoxCompactWidget()
+}
+
+class ToraBoxFocusWidget : GlanceAppWidget() {
+    override suspend fun provideGlance(context: Context, id: GlanceId) {
+        val state = ToraBoxRepository(context).load()
+        val focusRecord = state.shipments
+            .filter { !it.isArchived }
+            .sortedWith(
+                compareByDescending<ShipmentRecord> { it.isPinned }
+                    .thenBy { it.currentPhase == StandardDeliveryPhase.DELIVERED }
+                    .thenByDescending { it.currentPhase == StandardDeliveryPhase.OUT_FOR_DELIVERY }
+                    .thenByDescending { maxOf(it.lastUpdatedEpochMs, it.createdAtEpochMs) }
+            )
+            .firstOrNull()
+
+        provideContent {
+            val bgSurface = ColorProvider(day = Color(0xFFF7F8FA), night = Color(0xFF171A21))
+            val cardSurface = ColorProvider(day = Color(0xFFFFFFFF), night = Color(0xFF212631))
+            val textPrimary = ColorProvider(day = Color(0xFF141820), night = Color(0xFFF3F5F8))
+            val textSecondary = ColorProvider(day = Color(0xFF5D6676), night = Color(0xFFA0AAB8))
+            val accentBlue = ColorProvider(day = Color(0xFF2B76FF), night = Color(0xFF5A97FF))
+            val pillBg = ColorProvider(day = Color(0xFFE8F0FF), night = Color(0xFF24334D))
+            val launchHomeIntent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
+
+            Column(
+                modifier = GlanceModifier
+                    .fillMaxSize()
+                    .background(bgSurface)
+                    .cornerRadius(22.dp)
+                    .padding(14.dp)
+            ) {
+                if (focusRecord == null) {
+                    Box(
+                        modifier = GlanceModifier
+                            .fillMaxSize()
+                            .background(cardSurface)
+                            .cornerRadius(16.dp)
+                            .clickable(actionStartActivity(launchHomeIntent))
+                            .padding(14.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "고정된 배송이 없습니다. 탭하여 송장을 추가하세요.",
+                            style = TextStyle(color = textSecondary, fontSize = 12.sp)
+                        )
+                    }
+                } else {
+                    val carrierShort = KoreanCarrierCatalog.findById(focusRecord.carrierId)?.shortName ?: focusRecord.carrierId
+                    val detailIntent = Intent(context, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        putExtra(NotificationHelper.EXTRA_SHIPMENT_ID, focusRecord.id)
+                    }
+                    val latestEvent = focusRecord.events.firstOrNull()
+
+                    Row(
+                        modifier = GlanceModifier
+                            .fillMaxWidth()
+                            .clickable(actionStartActivity(detailIntent)),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = GlanceModifier.defaultWeight()) {
+                            Text(
+                                text = focusRecord.displayTitle(carrierShort),
+                                maxLines = 1,
+                                style = TextStyle(color = textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            )
+                            Text(
+                                text = "$carrierShort · ${focusRecord.waybillNumber}",
+                                maxLines = 1,
+                                style = TextStyle(color = textSecondary, fontSize = 11.sp)
+                            )
+                        }
+                        Box(
+                            modifier = GlanceModifier
+                                .background(pillBg)
+                                .cornerRadius(12.dp)
+                                .clickable(actionRunCallback<RefreshWidgetAction>())
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = "새로고침",
+                                style = TextStyle(color = accentBlue, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = GlanceModifier.height(10.dp))
+
+                    // Step progress indicators (6 phases)
+                    val activeStep = focusRecord.currentPhase.stepIndex.coerceIn(0, 5)
+                    Row(modifier = GlanceModifier.fillMaxWidth()) {
+                        for (step in 0..5) {
+                            if (step > 0) Spacer(modifier = GlanceModifier.width(4.dp))
+                            val filled = step <= activeStep
+                            Box(
+                                modifier = GlanceModifier
+                                    .defaultWeight()
+                                    .height(6.dp)
+                                    .cornerRadius(3.dp)
+                                    .background(if (filled) accentBlue else cardSurface)
+                            ) {}
+                        }
+                    }
+
+                    Spacer(modifier = GlanceModifier.height(10.dp))
+
+                    Column(
+                        modifier = GlanceModifier
+                            .fillMaxSize()
+                            .background(cardSurface)
+                            .cornerRadius(14.dp)
+                            .clickable(actionStartActivity(detailIntent))
+                            .padding(12.dp)
+                    ) {
+                        Text(
+                            text = buildString {
+                                append(focusRecord.currentPhase.label)
+                                if (focusRecord.estimatedDeliveryLabel.isNotBlank()) {
+                                    append(" · ").append(focusRecord.estimatedDeliveryLabel)
+                                }
+                            },
+                            style = TextStyle(color = accentBlue, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        )
+                        Spacer(modifier = GlanceModifier.height(4.dp))
+                        Text(
+                            text = latestEvent?.let { ev ->
+                                listOf(ev.location, ev.description).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { ev.statusName }
+                            } ?: focusRecord.currentStatusLabel,
+                            maxLines = 2,
+                            style = TextStyle(color = textPrimary, fontSize = 11.sp)
+                        )
+                        if (latestEvent?.displayTime?.isNotBlank() == true) {
+                            Spacer(modifier = GlanceModifier.height(4.dp))
+                            Text(
+                                text = latestEvent.displayTime,
+                                style = TextStyle(color = textSecondary, fontSize = 10.sp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+class ToraBoxFocusWidgetReceiver : GlanceAppWidgetReceiver() {
+    override val glanceAppWidget: GlanceAppWidget = ToraBoxFocusWidget()
+}
+
 object ToraBoxWidgetUpdater {
     fun updateAllAsync(context: Context) {
         val appContext = context.applicationContext
         CoroutineScope(Dispatchers.IO).launch {
-            runCatching {
-                val manager = GlanceAppWidgetManager(appContext)
-                val ids = manager.getGlanceIds(ToraBoxGlanceWidget::class.java)
-                val widget = ToraBoxGlanceWidget()
-                ids.forEach { id -> widget.update(appContext, id) }
-            }
+            updateAll(appContext)
         }
     }
 
     suspend fun updateAll(context: Context) {
+        val appContext = context.applicationContext
         runCatching {
-            val manager = GlanceAppWidgetManager(context.applicationContext)
-            val ids = manager.getGlanceIds(ToraBoxGlanceWidget::class.java)
-            val widget = ToraBoxGlanceWidget()
-            ids.forEach { id -> widget.update(context.applicationContext, id) }
+            val manager = GlanceAppWidgetManager(appContext)
+            manager.getGlanceIds(ToraBoxGlanceWidget::class.java).forEach { id ->
+                ToraBoxGlanceWidget().update(appContext, id)
+            }
+            manager.getGlanceIds(ToraBoxCompactWidget::class.java).forEach { id ->
+                ToraBoxCompactWidget().update(appContext, id)
+            }
+            manager.getGlanceIds(ToraBoxFocusWidget::class.java).forEach { id ->
+                ToraBoxFocusWidget().update(appContext, id)
+            }
         }
     }
 }

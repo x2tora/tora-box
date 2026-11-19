@@ -13,9 +13,10 @@ object ShipmentMaintenance {
     fun applyTrackingResult(
         base: ShipmentRecord,
         tr: TrackingResult,
-        nowEpochMs: Long = System.currentTimeMillis()
+        nowEpochMs: Long = System.currentTimeMillis(),
+        historicalSameCarrierHours: Double? = null
     ): ShipmentRecord {
-        return base.copy(
+        val updated = base.copy(
             carrierId = tr.carrierId,
             itemName = tr.itemName.ifBlank { base.itemName },
             itemQuantity = tr.itemQuantity.ifBlank { base.itemQuantity },
@@ -34,7 +35,12 @@ object ShipmentMaintenance {
             currentCarrierStageIndex = tr.currentCarrierStageIndex,
             events = if (tr.events.isNotEmpty()) tr.events else base.events,
             lastUpdatedEpochMs = nowEpochMs,
-            lastSyncSource = tr.syncSource
+            lastSyncSource = tr.syncSource,
+            lastLatencyMs = if (tr.latencyMs > 0L) tr.latencyMs else base.lastLatencyMs
+        )
+        return updated.copy(
+            anomalyType = DeliveryIntelligence.detectAnomaly(updated, nowEpochMs),
+            estimatedDeliveryLabel = DeliveryIntelligence.estimateDeliveryLabel(updated, historicalSameCarrierHours)
         )
     }
 

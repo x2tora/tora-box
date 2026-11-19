@@ -57,7 +57,9 @@ class ShipmentSyncWorker(
                     carrier = carrier,
                     rawWaybill = record.waybillNumber,
                     sweetTrackerApiKey = settings.sweetTrackerApiKey,
-                    customTrackerEndpoint = settings.customTrackerEndpoint
+                    customTrackerEndpoint = settings.customTrackerEndpoint,
+                    appContext = applicationContext,
+                    personalCustomsCode = settings.personalCustomsCode
                 ).getOrNull()
                 record.id to tracking
             }
@@ -89,7 +91,23 @@ class ShipmentSyncWorker(
         repo.save(initialState.copy(shipments = finalShipments))
         ToraBoxWidgetUpdater.updateAll(applicationContext)
         if (settings.backgroundSyncEnabled && phaseChanges.isNotEmpty()) {
-            NotificationHelper.notifyPhaseChanges(applicationContext, phaseChanges)
+            NotificationHelper.notifyPhaseChanges(applicationContext, phaseChanges, settings)
+        }
+        if (settings.backgroundSyncEnabled && settings.notifyAnomalies) {
+            finalShipments.forEach { record ->
+                val prev = initialState.shipments.find { it.id == record.id }
+                val anomaly = record.anomalyType
+                if (anomaly != null && prev?.anomalyType != anomaly && !record.isArchived) {
+                    val carrierShort = KoreanCarrierCatalog.findById(record.carrierId)?.shortName ?: record.carrierId
+                    NotificationHelper.notifyAnomaly(
+                        context = applicationContext,
+                        shipmentId = record.id,
+                        title = record.displayTitle(carrierShort),
+                        anomaly = anomaly,
+                        settings = settings
+                    )
+                }
+            }
         }
         Result.success()
     }

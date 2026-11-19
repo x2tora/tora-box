@@ -154,7 +154,9 @@ fun MainScaffoldScreen(
     pendingSharedText: String? = null,
     onConsumeSharedText: () -> Unit = {},
     pendingShipmentId: String? = null,
-    onConsumeShipmentId: () -> Unit = {}
+    onConsumeShipmentId: () -> Unit = {},
+    pendingShortcutAction: String? = null,
+    onConsumeShortcutAction: () -> Unit = {}
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val refreshingIds by viewModel.refreshingIds.collectAsStateWithLifecycle()
@@ -165,6 +167,43 @@ fun MainScaffoldScreen(
     val surfaceBg = MiuixTheme.colorScheme.surface
     val notify: (String) -> Unit = { toastState.show(it) }
     var scannedWaybillForAddEdit by remember { mutableStateOf<String?>(null) }
+    @Suppress("DEPRECATION")
+    val rootClipboard = LocalClipboardManager.current
+
+    LaunchedEffect(pendingShortcutAction) {
+        when (pendingShortcutAction) {
+            "com.x2tora.torabox.ACTION_SCAN_BARCODE" -> {
+                backStack.add(AppRoute.BarcodeScanner(fromAddEdit = false))
+                onConsumeShortcutAction()
+            }
+            "com.x2tora.torabox.ACTION_ADD_SHIPMENT" -> {
+                backStack.add(AppRoute.AddEditShipment(null, null))
+                onConsumeShortcutAction()
+            }
+            "com.x2tora.torabox.ACTION_CLIPBOARD_TRACK" -> {
+                val clip = rootClipboard.getText()?.text.orEmpty()
+                val parsed = WaybillDetector.parseNotificationText(clip)
+                if (parsed.waybillNumber.length >= 6) {
+                    viewModel.trackAndAddShipment(
+                        rawWaybill = parsed.waybillNumber,
+                        preferredCarrierId = parsed.carrierHintId,
+                        itemNameHint = parsed.itemNameHint,
+                        senderNameHint = parsed.senderNameHint
+                    ) { res ->
+                        res.onSuccess { added ->
+                            notify("클립보드 송장을 조회·등록했습니다")
+                            backStack.add(AppRoute.ShipmentDetail(added.id))
+                        }.onFailure {
+                            backStack.add(AppRoute.AddEditShipment(parsed.waybillNumber, parsed.carrierHintId))
+                        }
+                    }
+                } else {
+                    notify("클립보드에서 유효한 송장번호를 찾지 못했습니다")
+                }
+                onConsumeShortcutAction()
+            }
+        }
+    }
 
     LaunchedEffect(pendingShipmentId) {
         if (!pendingShipmentId.isNullOrBlank()) {
@@ -259,7 +298,11 @@ fun MainScaffoldScreen(
                             viewModel.deleteShipment(id)
                             notify("송장을 삭제했습니다")
                         },
-                        onNotify = notify
+                        onNotify = notify,
+                        doorLockHint = state.settings.doorLockHint,
+                        onUpdateGroupTag = viewModel::updateGroupTag,
+                        onAddPhotoUri = viewModel::addPhotoUri,
+                        onRemovePhotoUri = viewModel::removePhotoUri
                     )
                 }
 
@@ -383,6 +426,9 @@ private fun MainTabsHost(
     // Detect unregistered waybill on clipboard on resume
     androidx.compose.runtime.DisposableEffect(lifecycleOwner, state.settings.autoDetectClipboardWaybill, state.shipments) {
         val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.reloadFromStorage()
+            }
             if (event == Lifecycle.Event.ON_RESUME && state.settings.autoDetectClipboardWaybill) {
                 val clip = clipboardManager.getText()?.text.orEmpty()
                 val parsed = WaybillDetector.parseNotificationText(clip)
@@ -545,9 +591,18 @@ private fun MainTabsHost(
                                 viewModel.archiveShipments(setOf(id), archived = true)
                                 notify("보관함으로 이동했어요")
                             },
+                            onTogglePin = { id ->
+                                viewModel.togglePin(id)
+                                notify("상단 고정 상태를 변경했어요")
+                            },
                             onRequestDeleteSingle = { record ->
                                 pendingSingleDelete = record
-                            }
+                            },
+                            onAcceptPendingCapture = { item ->
+                                viewModel.acceptPendingCapture(item) { msg -> notify(msg) }
+                            },
+                            onDismissPendingCapture = viewModel::dismissPendingCapture,
+                            onChangeSortOption = viewModel::updateHomeSortOption
                         )
 
                         1 -> SmartDetectScreen(
@@ -977,10 +1032,18 @@ private fun SettingsScreenHost(
                     onUpdateAutoDetectClipboard = viewModel::updateAutoDetectClipboard,
                     onUpdateAutoArchiveDays = viewModel::updateAutoArchiveDeliveredDays,
                     onUpdateBackgroundSync = viewModel::updateBackgroundSync,
+                    onUpdateAutoCaptureNotifications = viewModel::updateAutoCaptureNotifications,
+                    onUpdateAutoCaptureRegisterImmediately = viewModel::updateAutoCaptureRegisterImmediately,
+                    onUpdateQuietHours = viewModel::updateQuietHours,
+                    onUpdateNotifyAnomalies = viewModel::updateNotifyAnomalies,
+                    onUpdatePersonalCustomsCode = viewModel::updatePersonalCustomsCode,
+                    onUpdateBiometricLock = viewModel::updateBiometricLock,
+                    onUpdateSwipeActions = viewModel::updateSwipeActions,
+                    onUpdateDoorLockHint = viewModel::updateDoorLockHint,
                     onUpdateSweetTrackerApiKey = viewModel::updateSweetTrackerApiKey,
                     onUpdateCustomTrackerEndpoint = viewModel::updateCustomTrackerEndpoint,
                     onLoadSampleShipments = viewModel::loadSampleShipments,
-                    onExportJson = viewModel::exportBackupJson,
+                    onExportJson = { viewModel.exportBackupJson(includeSecrets = false) },
                     onPreviewBackupJson = viewModel::previewBackupJson,
                     onImportJson = viewModel::importBackupJson,
                     onResetAllData = viewModel::resetAllData,

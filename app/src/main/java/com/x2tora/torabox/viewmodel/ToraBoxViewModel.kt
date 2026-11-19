@@ -5,14 +5,18 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.x2tora.torabox.BuildConfig
 import com.x2tora.torabox.data.ToraBoxRepository
+import com.x2tora.torabox.domain.DeliveryIntelligence
 import com.x2tora.torabox.domain.KoreanCarrierCatalog
 import com.x2tora.torabox.domain.ParcelTrackingEngine
 import com.x2tora.torabox.domain.ShipmentMaintenance
 import com.x2tora.torabox.domain.WaybillDetector
 import com.x2tora.torabox.model.AppSettings
+import com.x2tora.torabox.model.HomeSortOption
 import com.x2tora.torabox.model.NavBarStyle
+import com.x2tora.torabox.model.PendingCaptureItem
 import com.x2tora.torabox.model.ShipmentRecord
 import com.x2tora.torabox.model.StandardDeliveryPhase
+import com.x2tora.torabox.model.SwipeActionOption
 import com.x2tora.torabox.model.ThemeColorStyle
 import com.x2tora.torabox.model.ThemeOption
 import com.x2tora.torabox.model.ToraBoxDataState
@@ -188,7 +192,9 @@ class ToraBoxViewModel(application: Application) : AndroidViewModel(application)
                     carrier = carrier,
                     rawWaybill = shipment.waybillNumber,
                     sweetTrackerApiKey = settings.sweetTrackerApiKey,
-                    customTrackerEndpoint = settings.customTrackerEndpoint
+                    customTrackerEndpoint = settings.customTrackerEndpoint,
+                    appContext = getApplication(),
+                    personalCustomsCode = settings.personalCustomsCode
                 )
                 res.onSuccess { tr ->
                     val merged = applyTrackingResult(shipment, tr)
@@ -229,7 +235,9 @@ class ToraBoxViewModel(application: Application) : AndroidViewModel(application)
                             carrier = carrier,
                             rawWaybill = item.waybillNumber,
                             sweetTrackerApiKey = settings.sweetTrackerApiKey,
-                            customTrackerEndpoint = settings.customTrackerEndpoint
+                            customTrackerEndpoint = settings.customTrackerEndpoint,
+                            appContext = getApplication(),
+                            personalCustomsCode = settings.personalCustomsCode
                         ).getOrNull()
                         item.id to tr
                     } finally {
@@ -282,14 +290,18 @@ class ToraBoxViewModel(application: Application) : AndroidViewModel(application)
                             carrier = c,
                             rawWaybill = waybill,
                             sweetTrackerApiKey = settings.sweetTrackerApiKey,
-                            customTrackerEndpoint = settings.customTrackerEndpoint
+                            customTrackerEndpoint = settings.customTrackerEndpoint,
+                            appContext = getApplication(),
+                            personalCustomsCode = settings.personalCustomsCode
                         )
                     } else {
                         ParcelTrackingEngine.probeAndTrackWaybill(
                             rawWaybill = waybill,
                             carrierHintId = null,
                             sweetTrackerApiKey = settings.sweetTrackerApiKey,
-                            customTrackerEndpoint = settings.customTrackerEndpoint
+                            customTrackerEndpoint = settings.customTrackerEndpoint,
+                            appContext = getApplication(),
+                            personalCustomsCode = settings.personalCustomsCode
                         )
                     }
                 } else {
@@ -297,7 +309,9 @@ class ToraBoxViewModel(application: Application) : AndroidViewModel(application)
                         rawWaybill = waybill,
                         carrierHintId = null,
                         sweetTrackerApiKey = settings.sweetTrackerApiKey,
-                        customTrackerEndpoint = settings.customTrackerEndpoint
+                        customTrackerEndpoint = settings.customTrackerEndpoint,
+                        appContext = getApplication(),
+                        personalCustomsCode = settings.personalCustomsCode
                     )
                 }
 
@@ -352,14 +366,18 @@ class ToraBoxViewModel(application: Application) : AndroidViewModel(application)
                             carrier = carrier,
                             rawWaybill = waybill,
                             sweetTrackerApiKey = settings.sweetTrackerApiKey,
-                            customTrackerEndpoint = settings.customTrackerEndpoint
+                            customTrackerEndpoint = settings.customTrackerEndpoint,
+                            appContext = getApplication(),
+                            personalCustomsCode = settings.personalCustomsCode
                         )
                     } else {
                         ParcelTrackingEngine.probeAndTrackWaybill(
                             rawWaybill = waybill,
                             carrierHintId = null,
                             sweetTrackerApiKey = settings.sweetTrackerApiKey,
-                            customTrackerEndpoint = settings.customTrackerEndpoint
+                            customTrackerEndpoint = settings.customTrackerEndpoint,
+                            appContext = getApplication(),
+                            personalCustomsCode = settings.personalCustomsCode
                         )
                     }
                 } else {
@@ -367,7 +385,9 @@ class ToraBoxViewModel(application: Application) : AndroidViewModel(application)
                         rawWaybill = waybill,
                         carrierHintId = null,
                         sweetTrackerApiKey = settings.sweetTrackerApiKey,
-                        customTrackerEndpoint = settings.customTrackerEndpoint
+                        customTrackerEndpoint = settings.customTrackerEndpoint,
+                        appContext = getApplication(),
+                        personalCustomsCode = settings.personalCustomsCode
                     )
                 }
                 onResult(res)
@@ -377,8 +397,88 @@ class ToraBoxViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun applyTrackingResult(base: ShipmentRecord, tr: TrackingResult): ShipmentRecord =
-        ShipmentMaintenance.applyTrackingResult(base, tr)
+    private fun applyTrackingResult(base: ShipmentRecord, tr: TrackingResult): ShipmentRecord {
+        val avgHours = DeliveryIntelligence.computeAverageDeliveryHours(_state.value.shipments, tr.carrierId)
+        return ShipmentMaintenance.applyTrackingResult(
+            base = base,
+            tr = tr,
+            historicalSameCarrierHours = avgHours
+        )
+    }
+
+    fun reloadFromStorage() {
+        val fresh = repo.load()
+        _state.value = fresh
+    }
+
+    fun acceptPendingCapture(item: PendingCaptureItem, onDone: (String) -> Unit = {}) {
+        updateAndSave { prev ->
+            prev.copy(pendingCaptures = prev.pendingCaptures.filterNot { it.id == item.id })
+        }
+        trackAndAddShipment(
+            rawWaybill = item.waybillNumber,
+            preferredCarrierId = item.carrierHintId,
+            itemNameHint = item.itemNameHint,
+            senderNameHint = item.senderNameHint
+        ) { res ->
+            res.onSuccess { onDone("'${it.displayTitle(it.carrierId)}' 등록 완료") }
+                .onFailure {
+                    val carrier = item.carrierHintId?.let { KoreanCarrierCatalog.findById(it) }
+                    upsertShipment(
+                        ShipmentRecord(
+                            id = UUID.randomUUID().toString(),
+                            waybillNumber = item.waybillNumber,
+                            carrierId = item.carrierHintId ?: "kr.cjlogistics",
+                            itemName = item.itemNameHint,
+                            senderName = item.senderNameHint,
+                            groupTag = "자동수집",
+                            iconKey = carrier?.iconKey ?: "box",
+                            colorHex = carrier?.accentColorHex ?: 0xFF3482FF,
+                            createdAtEpochMs = item.capturedAtEpochMs
+                        )
+                    )
+                    onDone("송장을 등록했습니다 (상세 정보는 나중에 다시 조회하세요)")
+                }
+        }
+    }
+
+    fun dismissPendingCapture(id: String) {
+        updateAndSave { prev ->
+            prev.copy(pendingCaptures = prev.pendingCaptures.filterNot { it.id == id })
+        }
+    }
+
+    fun updateGroupTag(shipmentId: String, tag: String) {
+        updateAndSave { prev ->
+            prev.copy(
+                shipments = prev.shipments.map {
+                    if (it.id == shipmentId) it.copy(groupTag = tag.trim()) else it
+                }
+            )
+        }
+    }
+
+    fun addPhotoUri(shipmentId: String, uri: String) {
+        updateAndSave { prev ->
+            prev.copy(
+                shipments = prev.shipments.map {
+                    if (it.id == shipmentId && uri !in it.photoUris) {
+                        it.copy(photoUris = (it.photoUris + uri).take(5))
+                    } else it
+                }
+            )
+        }
+    }
+
+    fun removePhotoUri(shipmentId: String, uri: String) {
+        updateAndSave { prev ->
+            prev.copy(
+                shipments = prev.shipments.map {
+                    if (it.id == shipmentId) it.copy(photoUris = it.photoUris - uri) else it
+                }
+            )
+        }
+    }
 
     // === Settings & Backup ===
     fun updateTheme(option: ThemeOption) = updateSettings { it.copy(themeOption = option) }
@@ -404,12 +504,47 @@ class ToraBoxViewModel(application: Application) : AndroidViewModel(application)
     fun updateCustomTrackerEndpoint(endpoint: String) = updateSettings {
         it.copy(customTrackerEndpoint = endpoint.trim().ifBlank { "https://apis.tracker.delivery" })
     }
+    fun updateAutoCaptureNotifications(enabled: Boolean) = updateSettings {
+        it.copy(autoCaptureNotificationsEnabled = enabled)
+    }
+    fun updateAutoCaptureRegisterImmediately(immediate: Boolean) = updateSettings {
+        it.copy(autoCaptureRegisterImmediately = immediate)
+    }
+    fun toggleCapturePackage(packageName: String) = updateSettings { cur ->
+        val next = if (packageName in cur.autoCaptureAllowedPackages) {
+            cur.autoCaptureAllowedPackages - packageName
+        } else {
+            cur.autoCaptureAllowedPackages + packageName
+        }
+        cur.copy(autoCaptureAllowedPackages = next)
+    }
+    fun updateQuietHours(enabled: Boolean, startHour: Int, endHour: Int) = updateSettings {
+        it.copy(
+            quietHoursEnabled = enabled,
+            quietHoursStartHour = startHour.coerceIn(0, 23),
+            quietHoursEndHour = endHour.coerceIn(0, 23)
+        )
+    }
+    fun toggleNotifyPhase(phase: StandardDeliveryPhase) = updateSettings { cur ->
+        val next = if (phase in cur.notifyPhases) cur.notifyPhases - phase else cur.notifyPhases + phase
+        cur.copy(notifyPhases = next)
+    }
+    fun updateNotifyAnomalies(enabled: Boolean) = updateSettings { it.copy(notifyAnomalies = enabled) }
+    fun updatePersonalCustomsCode(pccc: String) = updateSettings {
+        it.copy(personalCustomsCode = pccc.trim().uppercase())
+    }
+    fun updateBiometricLock(enabled: Boolean) = updateSettings { it.copy(biometricLockEnabled = enabled) }
+    fun updateHomeSortOption(option: HomeSortOption) = updateSettings { it.copy(homeSortOption = option) }
+    fun updateSwipeActions(right: SwipeActionOption, left: SwipeActionOption) = updateSettings {
+        it.copy(swipeRightAction = right, swipeLeftAction = left)
+    }
+    fun updateDoorLockHint(hint: String) = updateSettings { it.copy(doorLockHint = hint.trim()) }
 
     private fun updateSettings(transform: (AppSettings) -> AppSettings) {
         updateAndSave { prev -> prev.copy(settings = transform(prev.settings)) }
     }
 
-    fun exportBackupJson(): String = repo.exportJson(_state.value)
+    fun exportBackupJson(includeSecrets: Boolean = false): String = repo.exportJson(_state.value, includeSecrets)
 
     fun previewBackupJson(raw: String): Result<ToraBoxDataState> = repo.parseBackupJson(raw)
 

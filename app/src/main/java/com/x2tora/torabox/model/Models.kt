@@ -84,6 +84,40 @@ data class TrackingEvent(
 )
 
 @Serializable
+enum class DeliveryAnomalyType(val label: String, val badgeText: String) {
+    STALLED("48시간 이상 정체", "정체 주의"),
+    MISROUTED("오분류·경로 이탈", "오분류 주의"),
+    RETURNING("반송·수취거부", "반송 주의"),
+    CUSTOMS_HOLD("통관 보류·검사", "통관 보류")
+}
+
+@Serializable
+enum class HomeSortOption(val label: String) {
+    LATEST("최신 업데이트순"),
+    OUT_FOR_DELIVERY_FIRST("배송출발 우선"),
+    ETA_SOONEST("도착임박순"),
+    NAME("이름순")
+}
+
+@Serializable
+enum class SwipeActionOption(val label: String) {
+    ARCHIVE("보관"),
+    PIN("상단 고정"),
+    DELETE("삭제")
+}
+
+@Serializable
+data class PendingCaptureItem(
+    val id: String,
+    val waybillNumber: String,
+    val carrierHintId: String? = null,
+    val itemNameHint: String = "",
+    val senderNameHint: String = "",
+    val sourceAppLabel: String = "",
+    val capturedAtEpochMs: Long = 0L
+)
+
+@Serializable
 data class ShipmentRecord(
     val id: String,
     val waybillNumber: String,
@@ -112,7 +146,13 @@ data class ShipmentRecord(
     val memo: String = "",
     val createdAtEpochMs: Long = 0L,
     val lastUpdatedEpochMs: Long = 0L,
-    val lastSyncSource: String = ""
+    val lastSyncSource: String = "",
+    val groupTag: String = "",
+    val linkedWaybillId: String? = null,
+    val photoUris: List<String> = emptyList(),
+    val anomalyType: DeliveryAnomalyType? = null,
+    val estimatedDeliveryLabel: String = "",
+    val lastLatencyMs: Long = 0L
 ) {
     fun displayTitle(carrierShortName: String): String =
         customTitle.trim().ifBlank {
@@ -132,17 +172,52 @@ data class AppSettings(
     val autoArchiveDeliveredDays: Int = 0,
     val backgroundSyncEnabled: Boolean = false,
     val backgroundSyncIntervalHours: Int = 3,
+    val autoCaptureNotificationsEnabled: Boolean = false,
+    val autoCaptureAllowedPackages: Set<String> = DEFAULT_CAPTURE_PACKAGES,
+    val autoCaptureRegisterImmediately: Boolean = true,
+    val quietHoursEnabled: Boolean = false,
+    val quietHoursStartHour: Int = 23,
+    val quietHoursEndHour: Int = 7,
+    val notifyPhases: Set<StandardDeliveryPhase> = setOf(
+        StandardDeliveryPhase.PICKED_UP,
+        StandardDeliveryPhase.OUT_FOR_DELIVERY,
+        StandardDeliveryPhase.DELIVERED,
+        StandardDeliveryPhase.EXCEPTION
+    ),
+    val notifyAnomalies: Boolean = true,
+    val personalCustomsCode: String = "",
+    val biometricLockEnabled: Boolean = false,
+    val homeSortOption: HomeSortOption = HomeSortOption.LATEST,
+    val swipeRightAction: SwipeActionOption = SwipeActionOption.ARCHIVE,
+    val swipeLeftAction: SwipeActionOption = SwipeActionOption.DELETE,
+    val doorLockHint: String = "",
     val sweetTrackerApiKey: String = "",
     val customTrackerEndpoint: String = "https://apis.tracker.delivery"
 ) {
     fun resolvedColorStyle(): ThemeColorStyle = themeColorStyle
     fun resolvedNavBarStyle(): NavBarStyle = navBarStyle
+
+    companion object {
+        val DEFAULT_CAPTURE_PACKAGES = setOf(
+            "com.kakao.talk",
+            "com.google.android.apps.messaging",
+            "com.samsung.android.messaging",
+            "com.coupang.mobile",
+            "com.nhn.android.search",
+            "com.musinsa.store",
+            "com.alibaba.aliexpresshd",
+            "com.einnovation.temu",
+            "com.oliveyoung",
+            "com.kurly.android"
+        )
+    }
 }
 
 @Serializable
 data class ToraBoxDataState(
     val shipments: List<ShipmentRecord> = emptyList(),
     val recentSearches: List<String> = emptyList(),
+    val pendingCaptures: List<PendingCaptureItem> = emptyList(),
     val settings: AppSettings = AppSettings()
 )
 
@@ -179,7 +254,10 @@ data class TrackingResult(
     val currentPhase: StandardDeliveryPhase = StandardDeliveryPhase.PREPARING,
     val currentCarrierStageIndex: Int = 0,
     val events: List<TrackingEvent> = emptyList(),
-    val syncSource: String = ""
+    val syncSource: String = "",
+    val latencyMs: Long = 0L,
+    val linkedDomesticWaybill: String = "",
+    val linkedDomesticCarrierId: String = ""
 )
 
 sealed interface ShipmentFilter {
