@@ -3,6 +3,7 @@ package com.x2tora.torabox.ui.components
 import android.os.Build
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -12,10 +13,15 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +36,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -44,6 +51,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,9 +63,11 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -76,6 +86,7 @@ import com.x2tora.torabox.ui.theme.LocalLiquidGlassEnabled
 import com.x2tora.torabox.ui.theme.ToraBoxIconCatalog
 import com.x2tora.torabox.ui.theme.ToraBoxMotion
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
@@ -92,12 +103,16 @@ import top.yukonga.miuix.kmp.blur.ProgressiveBlur
 import top.yukonga.miuix.kmp.blur.progressiveTextureBlur
 import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Close
+import top.yukonga.miuix.kmp.icon.extended.Delete
+import top.yukonga.miuix.kmp.icon.extended.Folder
 import top.yukonga.miuix.kmp.icon.extended.Ok
 import top.yukonga.miuix.kmp.icon.extended.Pin
 import top.yukonga.miuix.kmp.icon.extended.Refresh
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.shader.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.squircle.squircleBackground
+import top.yukonga.miuix.kmp.squircle.squircleBorder
 import top.yukonga.miuix.kmp.squircle.squircleClip
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -741,13 +756,99 @@ fun CarrierStageStepper(
 }
 
 @Composable
+fun SelectionActionBar(
+    selectedCount: Int,
+    allSelected: Boolean,
+    archiveLabel: String = "보관",
+    onToggleSelectAll: () -> Unit,
+    onArchiveSelected: () -> Unit,
+    onDeleteSelected: () -> Unit,
+    onExitSelection: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        cornerRadius = 18.dp,
+        insideMargin = PaddingValues(horizontal = 14.dp, vertical = 12.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${selectedCount}건 선택됨",
+                    style = MiuixTheme.textStyles.headline2.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontFeatureSettings = "tnum"
+                    ),
+                    color = MiuixTheme.colorScheme.primary
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SquirclePillBadge(
+                        text = if (allSelected) "선택 해제" else "전체 선택",
+                        backgroundColor = MiuixTheme.colorScheme.surfaceContainerHigh,
+                        contentColor = MiuixTheme.colorScheme.onSurface,
+                        onClick = onToggleSelectAll
+                    )
+                    IconButton(
+                        onClick = onExitSelection,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = MiuixIcons.Close,
+                            contentDescription = "선택 모드 닫기",
+                            tint = MiuixTheme.colorScheme.onSurfaceVariantActions,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                SquirclePillBadge(
+                    text = archiveLabel,
+                    backgroundColor = MiuixTheme.colorScheme.secondaryContainer,
+                    contentColor = MiuixTheme.colorScheme.onSecondaryContainer,
+                    leadingIcon = MiuixIcons.Folder,
+                    onClick = if (selectedCount > 0) onArchiveSelected else null,
+                    modifier = Modifier.weight(1f)
+                )
+                SquirclePillBadge(
+                    text = if (selectedCount > 0) "선택 삭제 (${selectedCount})" else "삭제",
+                    backgroundColor = if (selectedCount > 0) {
+                        MiuixTheme.colorScheme.error
+                    } else MiuixTheme.colorScheme.error.copy(alpha = 0.35f),
+                    contentColor = Color.White,
+                    leadingIcon = MiuixIcons.Delete,
+                    onClick = if (selectedCount > 0) onDeleteSelected else null,
+                    modifier = Modifier.weight(1.3f)
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
 fun ShipmentSummaryCard(
     shipment: ShipmentRecord,
     isRefreshing: Boolean,
     onClick: () -> Unit,
     onRefresh: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    selectionMode: Boolean = false,
+    isSelected: Boolean = false,
+    onLongClick: (() -> Unit)? = null
 ) {
+    val haptic = LocalHapticFeedback.current
     val carrier: CarrierInfo? = KoreanCarrierCatalog.findById(shipment.carrierId)
     val carrierShort = carrier?.shortName ?: shipment.carrierId
     val semanticColor = phaseSemanticColor(shipment.currentPhase)
@@ -759,7 +860,21 @@ fun ShipmentSummaryCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .then(
+                if (selectionMode && isSelected) {
+                    Modifier.squircleBorder(1.75.dp, MiuixTheme.colorScheme.primary, 18.dp)
+                } else Modifier
+            )
+            .squircleClip(18.dp)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    if (onLongClick != null) {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onLongClick()
+                    }
+                }
+            ),
         cornerRadius = 18.dp,
         insideMargin = PaddingValues(16.dp)
     ) {
@@ -829,16 +944,44 @@ fun ShipmentSummaryCard(
                     contentColor = semanticColor
                 )
 
-                IconButton(
-                    onClick = onRefresh,
-                    modifier = Modifier.size(34.dp)
-                ) {
-                    Icon(
-                        imageVector = MiuixIcons.Refresh,
-                        contentDescription = "새로고침",
-                        tint = if (isRefreshing) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantActions,
-                        modifier = Modifier.size(18.dp)
-                    )
+                if (selectionMode) {
+                    Box(
+                        modifier = Modifier
+                            .size(26.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (isSelected) MiuixTheme.colorScheme.primary
+                                else Color.Transparent
+                            )
+                            .border(
+                                width = 1.8.dp,
+                                color = if (isSelected) MiuixTheme.colorScheme.primary
+                                else MiuixTheme.colorScheme.onSurface.copy(alpha = 0.28f),
+                                shape = CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isSelected) {
+                            Icon(
+                                imageVector = MiuixIcons.Ok,
+                                contentDescription = "선택됨",
+                                tint = MiuixTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                    }
+                } else {
+                    IconButton(
+                        onClick = onRefresh,
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            imageVector = MiuixIcons.Refresh,
+                            contentDescription = "새로고침",
+                            tint = if (isRefreshing) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantActions,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
 
@@ -882,6 +1025,107 @@ fun ShipmentSummaryCard(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Wraps a shipment card with horizontal swipe actions (right = archive/restore, left = delete).
+ */
+@Composable
+fun SwipeableShipmentCard(
+    enabled: Boolean,
+    rightActionLabel: String = "보관",
+    leftActionLabel: String = "삭제",
+    onSwipeRight: () -> Unit,
+    onSwipeLeft: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val haptics = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+    val maxOffsetPx = with(density) { 128.dp.toPx() }
+    val triggerThresholdPx = with(density) { 84.dp.toPx() }
+    val offsetX = remember { Animatable(0f) }
+    var triggeredHaptic by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .squircleClip(18.dp)
+    ) {
+        if (offsetX.value > 6f) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(Color(0xFF16A34A).copy(alpha = 0.16f))
+                    .padding(horizontal = 20.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                SquirclePillBadge(
+                    text = rightActionLabel,
+                    backgroundColor = Color(0xFF16A34A),
+                    contentColor = Color.White
+                )
+            }
+        } else if (offsetX.value < -6f) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(Color(0xFFDC2626).copy(alpha = 0.16f))
+                    .padding(horizontal = 20.dp),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                SquirclePillBadge(
+                    text = leftActionLabel,
+                    backgroundColor = Color(0xFFDC2626),
+                    contentColor = Color.White
+                )
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .offset { androidx.compose.ui.unit.IntOffset(offsetX.value.toInt(), 0) }
+                .draggable(
+                    orientation = Orientation.Horizontal,
+                    enabled = enabled,
+                    state = rememberDraggableState { delta ->
+                        scope.launch {
+                            val next = (offsetX.value + delta).coerceIn(-maxOffsetPx, maxOffsetPx)
+                            offsetX.snapTo(next)
+                            val past = kotlin.math.abs(next) >= triggerThresholdPx
+                            if (past && !triggeredHaptic) {
+                                triggeredHaptic = true
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            } else if (!past) {
+                                triggeredHaptic = false
+                            }
+                        }
+                    },
+                    onDragStopped = {
+                        triggeredHaptic = false
+                        val current = offsetX.value
+                        scope.launch {
+                            when {
+                                current >= triggerThresholdPx -> {
+                                    offsetX.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = 400f))
+                                    onSwipeRight()
+                                }
+                                current <= -triggerThresholdPx -> {
+                                    offsetX.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = 400f))
+                                    onSwipeLeft()
+                                }
+                                else -> {
+                                    offsetX.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = 400f))
+                                }
+                            }
+                        }
+                    }
+                )
+        ) {
+            content()
         }
     }
 }

@@ -77,6 +77,7 @@ import com.x2tora.torabox.model.NavBarStyle
 import com.x2tora.torabox.model.StandardDeliveryPhase
 import com.x2tora.torabox.model.ThemeColorStyle
 import com.x2tora.torabox.ui.components.AppUpdateDialog
+import com.x2tora.torabox.ui.components.ConfirmActionDialog
 import com.x2tora.torabox.ui.components.FloatingLiquidGlassNavBar
 import com.x2tora.torabox.ui.components.MiuixBottomEdgeBlur
 import com.x2tora.torabox.ui.components.MiuixFloatingScrollTopBar
@@ -135,8 +136,13 @@ sealed interface AppRoute : NavKey {
     @Serializable
     data class AddEditShipment(
         val prefillWaybill: String? = null,
-        val prefillCarrierId: String? = null
+        val prefillCarrierId: String? = null,
+        val prefillItemName: String? = null,
+        val prefillSenderName: String? = null
     ) : AppRoute
+
+    @Serializable
+    data class BarcodeScanner(val fromAddEdit: Boolean = false) : AppRoute
 
     @Serializable
     data object Settings : AppRoute
@@ -144,7 +150,11 @@ sealed interface AppRoute : NavKey {
 
 @Composable
 fun MainScaffoldScreen(
-    viewModel: ToraBoxViewModel
+    viewModel: ToraBoxViewModel,
+    pendingSharedText: String? = null,
+    onConsumeSharedText: () -> Unit = {},
+    pendingShipmentId: String? = null,
+    onConsumeShipmentId: () -> Unit = {}
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val refreshingIds by viewModel.refreshingIds.collectAsStateWithLifecycle()
@@ -154,6 +164,34 @@ fun MainScaffoldScreen(
     val toastState = rememberStackedToastState()
     val surfaceBg = MiuixTheme.colorScheme.surface
     val notify: (String) -> Unit = { toastState.show(it) }
+    var scannedWaybillForAddEdit by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(pendingShipmentId) {
+        if (!pendingShipmentId.isNullOrBlank()) {
+            backStack.add(AppRoute.ShipmentDetail(pendingShipmentId))
+            onConsumeShipmentId()
+        }
+    }
+
+    LaunchedEffect(pendingSharedText) {
+        if (!pendingSharedText.isNullOrBlank()) {
+            val parsed = WaybillDetector.parseNotificationText(pendingSharedText)
+            if (parsed.waybillNumber.length >= 6) {
+                backStack.add(
+                    AppRoute.AddEditShipment(
+                        prefillWaybill = parsed.waybillNumber,
+                        prefillCarrierId = parsed.carrierHintId,
+                        prefillItemName = parsed.itemNameHint.ifBlank { null },
+                        prefillSenderName = parsed.senderNameHint.ifBlank { null }
+                    )
+                )
+                notify("공유된 메시지에서 송장번호를 불러왔습니다")
+            } else {
+                notify("공유된 내용에서 송장번호를 찾지 못했습니다")
+            }
+            onConsumeSharedText()
+        }
+    }
 
     val ambientBackdrop = rememberLayerBackdrop {
         drawRect(surfaceBg)
@@ -195,6 +233,9 @@ fun MainScaffoldScreen(
                         onOpenAdd = { waybill, carrierId ->
                             backStack.add(AppRoute.AddEditShipment(waybill, carrierId))
                         },
+                        onOpenScanner = {
+                            backStack.add(AppRoute.BarcodeScanner(fromAddEdit = false))
+                        },
                         onOpenSettings = { backStack.add(AppRoute.Settings) }
                     )
                 }
@@ -226,6 +267,13 @@ fun MainScaffoldScreen(
                     AddEditShipmentScreen(
                         prefillWaybill = route.prefillWaybill,
                         prefillCarrierId = route.prefillCarrierId,
+                        prefillItemName = route.prefillItemName,
+                        prefillSenderName = route.prefillSenderName,
+                        scannedWaybill = scannedWaybillForAddEdit,
+                        onConsumeScannedWaybill = { scannedWaybillForAddEdit = null },
+                        onOpenScanner = {
+                            backStack.add(AppRoute.BarcodeScanner(fromAddEdit = true))
+                        },
                         isProbing = isProbing,
                         toastState = toastState,
                         onProbePreview = viewModel::probeMetadataPreview,
@@ -239,6 +287,30 @@ fun MainScaffoldScreen(
                             if (backStack.size > 1) backStack.removeAt(backStack.lastIndex)
                         },
                         onNotify = notify
+                    )
+                }
+
+                entry<AppRoute.BarcodeScanner> { route ->
+                    BarcodeScannerScreen(
+                        onBarcodeDetected = { waybill ->
+                            if (backStack.size > 1) backStack.removeAt(backStack.lastIndex)
+                            if (route.fromAddEdit) {
+                                scannedWaybillForAddEdit = waybill
+                            } else {
+                                val guessedCarrier = WaybillDetector.recommendCarriers(waybill)
+                                    .firstOrNull()?.carrier?.id
+                                backStack.add(
+                                    AppRoute.AddEditShipment(
+                                        prefillWaybill = waybill,
+                                        prefillCarrierId = guessedCarrier
+                                    )
+                                )
+                            }
+                            notify("스캔된 송장: $waybill")
+                        },
+                        onBack = {
+                            if (backStack.size > 1) backStack.removeAt(backStack.lastIndex)
+                        }
                     )
                 }
 
@@ -263,6 +335,7 @@ private fun MainTabsHost(
     toastState: StackedToastState,
     onOpenDetail: (String) -> Unit,
     onOpenAdd: (String?, String?) -> Unit,
+    onOpenScanner: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -283,6 +356,26 @@ private fun MainTabsHost(
     var measuredTopBarHeightDp by remember { mutableStateOf(0.dp) }
     var clipboardCandidate by remember { mutableStateOf<String?>(null) }
     var dismissedClipWaybill by remember { mutableStateOf<String?>(null) }
+    var isSelectionMode by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var showBatchDeleteConfirm by remember { mutableStateOf(false) }
+    var pendingSingleDelete by remember { mutableStateOf<com.x2tora.torabox.model.ShipmentRecord?>(null) }
+
+    val clearSelection: () -> Unit = {
+        isSelectionMode = false
+        selectedIds = emptySet()
+    }
+    val enterSelectionMode: (String) -> Unit = { id ->
+        isSelectionMode = true
+        selectedIds = setOf(id)
+    }
+    val toggleSelection: (String) -> Unit = { id ->
+        val updated = if (id in selectedIds) selectedIds - id else selectedIds + id
+        selectedIds = updated
+        if (updated.isEmpty()) {
+            isSelectionMode = false
+        }
+    }
 
     val homeListState = rememberLazyListState()
     val notify: (String) -> Unit = { toastState.show(it) }
@@ -309,6 +402,7 @@ private fun MainTabsHost(
     BackHandler {
         when {
             showQuickMenu -> showQuickMenu = false
+            isSelectionMode -> clearSelection()
             selectedTab != 0 -> {
                 selectedTab = 0
                 lastBackPressedAtMs = 0L
@@ -358,7 +452,7 @@ private fun MainTabsHost(
         }
     }
 
-    val tabTitles = listOf("ToraBox", "스마트 추측", "택배사 도감", "보관함 · 통계")
+    val tabTitles = listOf("토라박스", "스마트 추측", "택배사 도감", "보관함 · 통계")
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -423,7 +517,37 @@ private fun MainTabsHost(
                                 notify("샘플 배송 3건을 불러왔습니다")
                             },
                             onNavigateToSmartDetect = { selectedTab = 1 },
-                            onNotify = notify
+                            onNotify = notify,
+                            isSelectionMode = isSelectionMode,
+                            selectedIds = selectedIds,
+                            onEnterSelectionMode = enterSelectionMode,
+                            onToggleSelect = toggleSelection,
+                            onSelectAll = { ids ->
+                                isSelectionMode = ids.isNotEmpty()
+                                selectedIds = ids.toSet()
+                            },
+                            onClearSelection = clearSelection,
+                            onArchiveSelected = {
+                                val count = selectedIds.size
+                                viewModel.archiveShipments(selectedIds, archived = true)
+                                clearSelection()
+                                notify("${count}건을 보관함으로 이동했어요")
+                            },
+                            onRequestDeleteSelected = {
+                                if (selectedIds.isNotEmpty()) showBatchDeleteConfirm = true
+                            },
+                            onOpenScanner = onOpenScanner,
+                            onArchiveAllDelivered = {
+                                val count = viewModel.archiveAllDelivered()
+                                if (count > 0) notify("배송완료 ${count}건을 보관함으로 이동했어요")
+                            },
+                            onSwipeArchive = { id ->
+                                viewModel.archiveShipments(setOf(id), archived = true)
+                                notify("보관함으로 이동했어요")
+                            },
+                            onRequestDeleteSingle = { record ->
+                                pendingSingleDelete = record
+                            }
                         )
 
                         1 -> SmartDetectScreen(
@@ -466,6 +590,24 @@ private fun MainTabsHost(
                             onOpenShipmentDetail = onOpenDetail,
                             onRefreshShipment = { id ->
                                 viewModel.refreshShipment(id) { _, msg -> notify(msg) }
+                            },
+                            isSelectionMode = isSelectionMode,
+                            selectedIds = selectedIds,
+                            onEnterSelectionMode = enterSelectionMode,
+                            onToggleSelect = toggleSelection,
+                            onSelectAll = { ids ->
+                                isSelectionMode = ids.isNotEmpty()
+                                selectedIds = ids.toSet()
+                            },
+                            onClearSelection = clearSelection,
+                            onRestoreSelected = {
+                                val count = selectedIds.size
+                                viewModel.archiveShipments(selectedIds, archived = false)
+                                clearSelection()
+                                notify("${count}건을 배송 목록으로 복원했어요")
+                            },
+                            onRequestDeleteSelected = {
+                                if (selectedIds.isNotEmpty()) showBatchDeleteConfirm = true
                             }
                         )
                     }
@@ -538,6 +680,7 @@ private fun MainTabsHost(
                         outForDeliveryCount = outForDeliveryCount,
                         onSelectTab = { tab ->
                             showQuickMenu = false
+                            if (selectedTab != tab) clearSelection()
                             selectedTab = tab
                         },
                         onCenterAddClick = { showQuickMenu = !showQuickMenu },
@@ -570,6 +713,7 @@ private fun MainTabsHost(
                                 selected = !showQuickMenu && selectedTab == 0,
                                 onClick = {
                                     showQuickMenu = false
+                                    if (selectedTab != 0) clearSelection()
                                     selectedTab = 0
                                 },
                                 icon = MiuixIcons.Regular.Home,
@@ -592,6 +736,7 @@ private fun MainTabsHost(
                                 selected = !showQuickMenu && selectedTab == 1,
                                 onClick = {
                                     showQuickMenu = false
+                                    if (selectedTab != 1) clearSelection()
                                     selectedTab = 1
                                 },
                                 icon = MiuixIcons.Scan,
@@ -650,6 +795,7 @@ private fun MainTabsHost(
                                 selected = !showQuickMenu && selectedTab == 2,
                                 onClick = {
                                     showQuickMenu = false
+                                    if (selectedTab != 2) clearSelection()
                                     selectedTab = 2
                                 },
                                 icon = MiuixIcons.ListView,
@@ -659,6 +805,7 @@ private fun MainTabsHost(
                                 selected = !showQuickMenu && selectedTab == 3,
                                 onClick = {
                                     showQuickMenu = false
+                                    if (selectedTab != 3) clearSelection()
                                     selectedTab = 3
                                 },
                                 icon = MiuixIcons.Folder,
@@ -701,6 +848,10 @@ private fun MainTabsHost(
                         showQuickMenu = false
                         onOpenAdd(null, null)
                     },
+                    onBarcodeScan = {
+                        showQuickMenu = false
+                        onOpenScanner()
+                    },
                     onRefreshAll = {
                         showQuickMenu = false
                         viewModel.refreshAllActiveShipments { ok, total ->
@@ -734,6 +885,42 @@ private fun MainTabsHost(
                 onStartDownload = viewModel::startUpdateDownloadAndInstall,
                 onRetryInstall = viewModel::retryApkInstall,
                 onOpenPermissionSettings = viewModel::openInstallUnknownSourcesSettings
+            )
+
+            ConfirmActionDialog(
+                show = showBatchDeleteConfirm,
+                title = "선택한 송장 삭제",
+                summary = "선택한 ${selectedIds.size}건의 배송 기록과 추적 이력을 완전히 삭제할까요? 삭제 후에는 되돌릴 수 없습니다.",
+                confirmText = "${selectedIds.size}건 삭제",
+                isDestructive = true,
+                onDismiss = { showBatchDeleteConfirm = false },
+                onConfirm = {
+                    val targets = selectedIds
+                    val count = targets.size
+                    showBatchDeleteConfirm = false
+                    clearSelection()
+                    viewModel.deleteShipments(targets)
+                    notify("${count}건의 배송 기록을 삭제했어요")
+                }
+            )
+
+            ConfirmActionDialog(
+                show = pendingSingleDelete != null,
+                title = "송장 삭제",
+                summary = pendingSingleDelete?.let { record ->
+                    val shortName = com.x2tora.torabox.domain.KoreanCarrierCatalog.findById(record.carrierId)?.shortName
+                        ?: record.carrierId
+                    "'${record.displayTitle(shortName)}'(${record.waybillNumber}) 배송 기록을 삭제할까요?"
+                }.orEmpty(),
+                confirmText = "삭제",
+                isDestructive = true,
+                onDismiss = { pendingSingleDelete = null },
+                onConfirm = {
+                    val target = pendingSingleDelete ?: return@ConfirmActionDialog
+                    pendingSingleDelete = null
+                    viewModel.deleteShipment(target.id)
+                    notify("송장을 삭제했어요")
+                }
             )
         }
     }
@@ -788,6 +975,8 @@ private fun SettingsScreenHost(
                     onUpdateWideDualLayout = viewModel::updateWideDualLayout,
                     onUpdateAutoRefreshOnLaunch = viewModel::updateAutoRefreshOnLaunch,
                     onUpdateAutoDetectClipboard = viewModel::updateAutoDetectClipboard,
+                    onUpdateAutoArchiveDays = viewModel::updateAutoArchiveDeliveredDays,
+                    onUpdateBackgroundSync = viewModel::updateBackgroundSync,
                     onUpdateSweetTrackerApiKey = viewModel::updateSweetTrackerApiKey,
                     onUpdateCustomTrackerEndpoint = viewModel::updateCustomTrackerEndpoint,
                     onLoadSampleShipments = viewModel::loadSampleShipments,
@@ -835,6 +1024,7 @@ private fun ExpandableQuickAddMenuOverlay(
     isLiquidGlass: Boolean,
     onClipboardTrack: () -> Unit,
     onManualAdd: () -> Unit,
+    onBarcodeScan: () -> Unit,
     onRefreshAll: () -> Unit
 ) {
     val isDark = LocalIsDarkTheme.current
@@ -944,6 +1134,16 @@ private fun ExpandableQuickAddMenuOverlay(
                     revealProgress = smoothStep(0.36f, 0.86f, clamped),
                     enabled = interactive,
                     onClick = onManualAdd
+                )
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 12.dp))
+                QuickAddMorphActionRow(
+                    icon = MiuixIcons.Scan,
+                    iconTint = Color(0xFF8B5CF6),
+                    title = "바코드 · QR 스캔",
+                    subtitle = "택배 상자·영수증 바코드로 즉시 입력",
+                    revealProgress = smoothStep(0.40f, 0.90f, clamped),
+                    enabled = interactive,
+                    onClick = onBarcodeScan
                 )
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 12.dp))
                 QuickAddMorphActionRow(

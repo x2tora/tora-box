@@ -129,6 +129,9 @@ data class AppSettings(
     val wideDualLayoutEnabled: Boolean = false,
     val autoRefreshOnLaunch: Boolean = true,
     val autoDetectClipboardWaybill: Boolean = true,
+    val autoArchiveDeliveredDays: Int = 0,
+    val backgroundSyncEnabled: Boolean = false,
+    val backgroundSyncIntervalHours: Int = 3,
     val sweetTrackerApiKey: String = "",
     val customTrackerEndpoint: String = "https://apis.tracker.delivery"
 ) {

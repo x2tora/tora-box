@@ -30,6 +30,7 @@ import com.x2tora.torabox.domain.KoreanCarrierCatalog
 import com.x2tora.torabox.model.StandardDeliveryPhase
 import com.x2tora.torabox.model.ToraBoxDataState
 import com.x2tora.torabox.ui.components.EmptyDataBanner
+import com.x2tora.torabox.ui.components.SelectionActionBar
 import com.x2tora.torabox.ui.components.ShipmentSummaryCard
 import com.x2tora.torabox.ui.components.SquirclePillBadge
 import top.yukonga.miuix.kmp.basic.Card
@@ -54,7 +55,15 @@ fun ArchiveStatsScreen(
     topInset: Dp,
     bottomBarExtraPadding: Dp,
     onOpenShipmentDetail: (String) -> Unit,
-    onRefreshShipment: (String) -> Unit
+    onRefreshShipment: (String) -> Unit,
+    isSelectionMode: Boolean = false,
+    selectedIds: Set<String> = emptySet(),
+    onEnterSelectionMode: (String) -> Unit = {},
+    onToggleSelect: (String) -> Unit = {},
+    onSelectAll: (List<String>) -> Unit = {},
+    onClearSelection: () -> Unit = {},
+    onRestoreSelected: () -> Unit = {},
+    onRequestDeleteSelected: () -> Unit = {}
 ) {
     var query by remember { mutableStateOf("") }
     var scopeTab by remember { mutableIntStateOf(0) } // 0=전체, 1=보관함, 2=배송완료
@@ -188,6 +197,24 @@ fun ArchiveStatsScreen(
                 }
             }
 
+            if (isSelectionMode) {
+                item(key = "archive_selection_bar") {
+                    val visibleIds = remember(filtered) { filtered.map { it.id } }
+                    val allSelected = visibleIds.isNotEmpty() && visibleIds.all { it in selectedIds }
+                    SelectionActionBar(
+                        selectedCount = selectedIds.size,
+                        allSelected = allSelected,
+                        archiveLabel = if (scopeTab == 1) "활성 복원" else "보관",
+                        onToggleSelectAll = {
+                            if (allSelected) onSelectAll(emptyList()) else onSelectAll(visibleIds)
+                        },
+                        onArchiveSelected = onRestoreSelected,
+                        onDeleteSelected = onRequestDeleteSelected,
+                        onExitSelection = onClearSelection
+                    )
+                }
+            }
+
             item(key = "archive_title") {
                 SmallTitle(text = "조회 내역 (${filtered.size}건)")
             }
@@ -205,7 +232,16 @@ fun ArchiveStatsScreen(
                     ShipmentSummaryCard(
                         shipment = shipment,
                         isRefreshing = shipment.id in refreshingIds,
-                        onClick = { onOpenShipmentDetail(shipment.id) },
+                        selectionMode = isSelectionMode,
+                        isSelected = shipment.id in selectedIds,
+                        onClick = {
+                            if (isSelectionMode) onToggleSelect(shipment.id)
+                            else onOpenShipmentDetail(shipment.id)
+                        },
+                        onLongClick = {
+                            if (!isSelectionMode) onEnterSelectionMode(shipment.id)
+                            else onToggleSelect(shipment.id)
+                        },
                         onRefresh = { onRefreshShipment(shipment.id) },
                         modifier = Modifier.animateItem()
                     )

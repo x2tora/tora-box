@@ -118,6 +118,13 @@ fun ShipmentDetailScreen(
 
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
+    var didNavigateBack by remember { mutableStateOf(false) }
+    val safeBack: () -> Unit = {
+        if (!didNavigateBack) {
+            didNavigateBack = true
+            onBack()
+        }
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -129,7 +136,7 @@ fun ShipmentDetailScreen(
                 backdrop = detailBackdrop,
                 maxContentWidth = 620.dp,
                 navigationIcon = {
-                    IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
+                    IconButton(onClick = safeBack, modifier = Modifier.size(48.dp)) {
                         Icon(
                             imageVector = MiuixIcons.Back,
                             contentDescription = "뒤로가기",
@@ -330,6 +337,13 @@ fun ShipmentDetailScreen(
                                                 }
                                             )
                                         }
+                                        SquirclePillBadge(
+                                            text = "삭제",
+                                            backgroundColor = MiuixTheme.colorScheme.error.copy(alpha = 0.14f),
+                                            contentColor = MiuixTheme.colorScheme.error,
+                                            leadingIcon = MiuixIcons.Delete,
+                                            onClick = { showDeleteConfirm = true }
+                                        )
                                     }
                                 }
                             }
@@ -517,84 +531,84 @@ fun ShipmentDetailScreen(
                     .navigationBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 24.dp)
             )
-        }
-    }
 
-    ConfirmActionDialog(
-        show = showDeleteConfirm,
-        title = "송장 삭제",
-        summary = "'${shipment.displayTitle(carrierShort)}' (${shipment.waybillNumber}) 기록을 삭제할까요?",
-        confirmText = "삭제",
-        isDestructive = true,
-        onDismiss = { showDeleteConfirm = false },
-        onConfirm = {
-            onDelete(shipment.id)
-            onBack()
-        }
-    )
+            ConfirmActionDialog(
+                show = showDeleteConfirm,
+                title = "송장 삭제",
+                summary = "'${shipment.displayTitle(carrierShort)}' (${shipment.waybillNumber}) 기록을 삭제할까요?",
+                confirmText = "삭제",
+                isDestructive = true,
+                onDismiss = { showDeleteConfirm = false },
+                onConfirm = {
+                    onDelete(shipment.id)
+                    safeBack()
+                }
+            )
 
-    if (showEditDialog) {
-        var aliasText by remember(shipment.id) { mutableStateOf(shipment.customTitle) }
-        var itemText by remember(shipment.id) { mutableStateOf(shipment.itemName) }
-        var senderText by remember(shipment.id) { mutableStateOf(shipment.senderName) }
-        var memoText by remember(shipment.id) { mutableStateOf(shipment.memo) }
+            if (showEditDialog) {
+                var aliasText by remember(shipment.id) { mutableStateOf(shipment.customTitle) }
+                var itemText by remember(shipment.id) { mutableStateOf(shipment.itemName) }
+                var senderText by remember(shipment.id) { mutableStateOf(shipment.senderName) }
+                var memoText by remember(shipment.id) { mutableStateOf(shipment.memo) }
 
-        OverlayDialog(
-            show = true,
-            title = "배송 정보 편집",
-            onDismissRequest = { showEditDialog = false }
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                TextField(
-                    value = aliasText,
-                    onValueChange = { aliasText = it },
-                    label = "사용자 별칭 (비워두면 물품명 사용)",
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                TextField(
-                    value = itemText,
-                    onValueChange = { itemText = it },
-                    label = "물품명",
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                TextField(
-                    value = senderText,
-                    onValueChange = { senderText = it },
-                    label = "보낸이",
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                TextField(
-                    value = memoText,
-                    onValueChange = { memoText = it },
-                    label = "메모",
-                    singleLine = false,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                OverlayDialog(
+                    show = true,
+                    title = "배송 정보 편집",
+                    onDismissRequest = { showEditDialog = false }
                 ) {
-                    TextButton(text = "취소", onClick = { showEditDialog = false }, modifier = Modifier.weight(1f))
-                    TextButton(
-                        text = "저장",
-                        onClick = {
-                            onUpdateRecord(
-                                shipment.copy(
-                                    customTitle = aliasText.trim(),
-                                    itemName = itemText.trim(),
-                                    senderName = senderText.trim(),
-                                    memo = memoText.trim()
-                                )
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        TextField(
+                            value = aliasText,
+                            onValueChange = { aliasText = it },
+                            label = "사용자 별칭 (비워두면 물품명 사용)",
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        TextField(
+                            value = itemText,
+                            onValueChange = { itemText = it },
+                            label = "물품명",
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        TextField(
+                            value = senderText,
+                            onValueChange = { senderText = it },
+                            label = "보낸이",
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        TextField(
+                            value = memoText,
+                            onValueChange = { memoText = it },
+                            label = "메모",
+                            singleLine = false,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            TextButton(text = "취소", onClick = { showEditDialog = false }, modifier = Modifier.weight(1f))
+                            TextButton(
+                                text = "저장",
+                                onClick = {
+                                    onUpdateRecord(
+                                        shipment.copy(
+                                            customTitle = aliasText.trim(),
+                                            itemName = itemText.trim(),
+                                            senderName = senderText.trim(),
+                                            memo = memoText.trim()
+                                        )
+                                    )
+                                    showEditDialog = false
+                                    onNotify("배송 정보를 수정했습니다")
+                                },
+                                colors = ButtonDefaults.textButtonColorsPrimary(),
+                                modifier = Modifier.weight(1f)
                             )
-                            showEditDialog = false
-                            onNotify("배송 정보를 수정했습니다")
-                        },
-                        colors = ButtonDefaults.textButtonColorsPrimary(),
-                        modifier = Modifier.weight(1f)
-                    )
+                        }
+                    }
                 }
             }
         }

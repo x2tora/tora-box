@@ -46,8 +46,10 @@ import com.x2tora.torabox.model.StandardDeliveryPhase
 import com.x2tora.torabox.model.ToraBoxDataState
 import com.x2tora.torabox.ui.components.EmptyDataBanner
 import com.x2tora.torabox.ui.components.MiuixGlassIcon
+import com.x2tora.torabox.ui.components.SelectionActionBar
 import com.x2tora.torabox.ui.components.ShipmentSummaryCard
 import com.x2tora.torabox.ui.components.SquirclePillBadge
+import com.x2tora.torabox.ui.components.SwipeableShipmentCard
 import com.x2tora.torabox.ui.theme.LocalWideDualLayoutEnabled
 import com.x2tora.torabox.ui.theme.ToraBoxMotion
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -89,7 +91,19 @@ fun HomeScreen(
     onRefreshAllActive: () -> Unit,
     onLoadSampleShipments: () -> Unit,
     onNavigateToSmartDetect: () -> Unit,
-    onNotify: (String) -> Unit
+    onNotify: (String) -> Unit,
+    isSelectionMode: Boolean = false,
+    selectedIds: Set<String> = emptySet(),
+    onEnterSelectionMode: (String) -> Unit = {},
+    onToggleSelect: (String) -> Unit = {},
+    onSelectAll: (List<String>) -> Unit = {},
+    onClearSelection: () -> Unit = {},
+    onArchiveSelected: () -> Unit = {},
+    onRequestDeleteSelected: () -> Unit = {},
+    onOpenScanner: () -> Unit = {},
+    onArchiveAllDelivered: () -> Unit = {},
+    onSwipeArchive: (String) -> Unit = {},
+    onRequestDeleteSingle: (ShipmentRecord) -> Unit = {}
 ) {
     @Suppress("DEPRECATION")
     val clipboardManager = LocalClipboardManager.current
@@ -98,6 +112,7 @@ fun HomeScreen(
 
     var quickInput by remember { mutableStateOf("") }
     var activeFilter by remember { mutableStateOf<ShipmentFilter>(ShipmentFilter.ALL) }
+    var pinnedOnly by remember { mutableStateOf(false) }
 
     val parsedInput = remember(quickInput) { WaybillDetector.parseNotificationText(quickInput) }
     val normalizedWaybill = parsedInput.waybillNumber
@@ -129,11 +144,15 @@ fun HomeScreen(
     val deliveredCount = remember(activeShipments) {
         activeShipments.count { it.currentPhase == StandardDeliveryPhase.DELIVERED }
     }
+    val pinnedCount = remember(activeShipments) {
+        activeShipments.count { it.isPinned }
+    }
 
-    val filteredShipments = remember(activeShipments, activeFilter) {
+    val filteredShipments = remember(activeShipments, activeFilter, pinnedOnly) {
+        val baseList = if (pinnedOnly) activeShipments.filter { it.isPinned } else activeShipments
         val list = when (activeFilter) {
-            ShipmentFilter.ALL -> activeShipments
-            ShipmentFilter.IN_TRANSIT -> activeShipments.filter {
+            ShipmentFilter.ALL -> baseList
+            ShipmentFilter.IN_TRANSIT -> baseList.filter {
                 it.currentPhase in setOf(
                     StandardDeliveryPhase.PREPARING,
                     StandardDeliveryPhase.PICKED_UP,
@@ -141,10 +160,10 @@ fun HomeScreen(
                     StandardDeliveryPhase.ARRIVED_AT_BRANCH
                 )
             }
-            ShipmentFilter.OUT_FOR_DELIVERY -> activeShipments.filter {
+            ShipmentFilter.OUT_FOR_DELIVERY -> baseList.filter {
                 it.currentPhase == StandardDeliveryPhase.OUT_FOR_DELIVERY
             }
-            ShipmentFilter.DELIVERED -> activeShipments.filter {
+            ShipmentFilter.DELIVERED -> baseList.filter {
                 it.currentPhase == StandardDeliveryPhase.DELIVERED
             }
         }
@@ -306,6 +325,25 @@ fun HomeScreen(
                                     .squircleBackground(MiuixTheme.colorScheme.surfaceContainerHigh, 14.dp)
                                     .squircleClip(14.dp)
                                     .clickable {
+                                        focusManager.clearFocus()
+                                        onOpenScanner()
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = MiuixIcons.Scan,
+                                    contentDescription = "바코드 스캔",
+                                    tint = MiuixTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .squircleBackground(MiuixTheme.colorScheme.surfaceContainerHigh, 14.dp)
+                                    .squircleClip(14.dp)
+                                    .clickable {
                                         val clipText = clipboardManager.getText()?.text.orEmpty()
                                         if (clipText.isBlank()) {
                                             onNotify("클립보드가 비어 있습니다")
@@ -443,7 +481,58 @@ fun HomeScreen(
                 }
             }
 
+            if (activeShipments.isNotEmpty() && (pinnedCount > 0 || deliveredCount > 0) && !isSelectionMode) {
+                item(key = "quick_filter_row") {
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (pinnedCount > 0) {
+                            item(key = "filter_pinned") {
+                                SquirclePillBadge(
+                                    text = if (pinnedOnly) "고정됨 ${pinnedCount} · 해제" else "고정됨 ${pinnedCount}",
+                                    backgroundColor = if (pinnedOnly) {
+                                        MiuixTheme.colorScheme.primary
+                                    } else MiuixTheme.colorScheme.surfaceContainerHigh,
+                                    contentColor = if (pinnedOnly) {
+                                        MiuixTheme.colorScheme.onPrimary
+                                    } else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    onClick = { pinnedOnly = !pinnedOnly }
+                                )
+                            }
+                        }
+                        if (deliveredCount > 0) {
+                            item(key = "archive_all_delivered") {
+                                SquirclePillBadge(
+                                    text = "배송완료 ${deliveredCount}건 한 번에 보관",
+                                    backgroundColor = Color(0xFF16A34A).copy(alpha = 0.14f),
+                                    contentColor = Color(0xFF16A34A),
+                                    onClick = onArchiveAllDelivered
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             if (activeShipments.isNotEmpty()) {
+                if (isSelectionMode) {
+                    item(key = "selection_bar") {
+                        val visibleIds = remember(filteredShipments) { filteredShipments.map { it.id } }
+                        val allSelected = visibleIds.isNotEmpty() && visibleIds.all { it in selectedIds }
+                        SelectionActionBar(
+                            selectedCount = selectedIds.size,
+                            allSelected = allSelected,
+                            archiveLabel = "보관",
+                            onToggleSelectAll = {
+                                if (allSelected) onSelectAll(emptyList()) else onSelectAll(visibleIds)
+                            },
+                            onArchiveSelected = onArchiveSelected,
+                            onDeleteSelected = onRequestDeleteSelected,
+                            onExitSelection = onClearSelection
+                        )
+                    }
+                }
                 item(key = "active_section_header") {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -451,13 +540,15 @@ fun HomeScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         SmallTitle(text = "진행중인 배송 (${filteredShipments.size})")
-                        SquirclePillBadge(
-                            text = if (refreshingIds.isNotEmpty()) "새로고침 중..." else "전체 새로고침",
-                            backgroundColor = MiuixTheme.colorScheme.surfaceContainerHigh,
-                            contentColor = MiuixTheme.colorScheme.primary,
-                            leadingIcon = MiuixIcons.Refresh,
-                            onClick = onRefreshAllActive
-                        )
+                        if (!isSelectionMode) {
+                            SquirclePillBadge(
+                                text = if (refreshingIds.isNotEmpty()) "새로고침 중..." else "전체 새로고침",
+                                backgroundColor = MiuixTheme.colorScheme.surfaceContainerHigh,
+                                contentColor = MiuixTheme.colorScheme.primary,
+                                leadingIcon = MiuixIcons.Refresh,
+                                onClick = onRefreshAllActive
+                            )
+                        }
                     }
                 }
             }
@@ -496,26 +587,56 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         pair.forEach { item ->
-                            ShipmentSummaryCard(
-                                shipment = item,
-                                isRefreshing = item.id in refreshingIds,
-                                onClick = { onOpenShipmentDetail(item.id) },
-                                onRefresh = { onRefreshShipment(item.id) },
+                            SwipeableShipmentCard(
+                                enabled = !isSelectionMode,
+                                onSwipeRight = { onSwipeArchive(item.id) },
+                                onSwipeLeft = { onRequestDeleteSingle(item) },
                                 modifier = Modifier.weight(1f)
-                            )
+                            ) {
+                                ShipmentSummaryCard(
+                                    shipment = item,
+                                    isRefreshing = item.id in refreshingIds,
+                                    selectionMode = isSelectionMode,
+                                    isSelected = item.id in selectedIds,
+                                    onClick = {
+                                        if (isSelectionMode) onToggleSelect(item.id)
+                                        else onOpenShipmentDetail(item.id)
+                                    },
+                                    onLongClick = {
+                                        if (!isSelectionMode) onEnterSelectionMode(item.id)
+                                        else onToggleSelect(item.id)
+                                    },
+                                    onRefresh = { onRefreshShipment(item.id) }
+                                )
+                            }
                         }
                         if (pair.size == 1) Spacer(modifier = Modifier.weight(1f))
                     }
                 }
             } else {
                 items(filteredShipments, key = { it.id }) { shipment ->
-                    ShipmentSummaryCard(
-                        shipment = shipment,
-                        isRefreshing = shipment.id in refreshingIds,
-                        onClick = { onOpenShipmentDetail(shipment.id) },
-                        onRefresh = { onRefreshShipment(shipment.id) },
+                    SwipeableShipmentCard(
+                        enabled = !isSelectionMode,
+                        onSwipeRight = { onSwipeArchive(shipment.id) },
+                        onSwipeLeft = { onRequestDeleteSingle(shipment) },
                         modifier = Modifier.animateItem()
-                    )
+                    ) {
+                        ShipmentSummaryCard(
+                            shipment = shipment,
+                            isRefreshing = shipment.id in refreshingIds,
+                            selectionMode = isSelectionMode,
+                            isSelected = shipment.id in selectedIds,
+                            onClick = {
+                                if (isSelectionMode) onToggleSelect(shipment.id)
+                                else onOpenShipmentDetail(shipment.id)
+                            },
+                            onLongClick = {
+                                if (!isSelectionMode) onEnterSelectionMode(shipment.id)
+                                else onToggleSelect(shipment.id)
+                            },
+                            onRefresh = { onRefreshShipment(shipment.id) }
+                        )
+                    }
                 }
             }
         }

@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">ToraBox</string>
+    <string name="app_name">토라박스</string>
+    <string name="widget_description">진행 중인 택배 배송 현황과 오늘 도착 예정 건수를 한눈에 확인합니다.</string>
 </resources>

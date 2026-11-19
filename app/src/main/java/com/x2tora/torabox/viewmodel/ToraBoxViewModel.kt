@@ -7,6 +7,7 @@ import com.x2tora.torabox.BuildConfig
 import com.x2tora.torabox.data.ToraBoxRepository
 import com.x2tora.torabox.domain.KoreanCarrierCatalog
 import com.x2tora.torabox.domain.ParcelTrackingEngine
+import com.x2tora.torabox.domain.ShipmentMaintenance
 import com.x2tora.torabox.domain.WaybillDetector
 import com.x2tora.torabox.model.AppSettings
 import com.x2tora.torabox.model.NavBarStyle
@@ -21,6 +22,8 @@ import com.x2tora.torabox.ui.components.AppUpdateUiState
 import com.x2tora.torabox.update.AppUpdater
 import com.x2tora.torabox.update.InstallLaunchOutcome
 import com.x2tora.torabox.update.UpdateCheckOutcome
+import com.x2tora.torabox.widget.ToraBoxWidgetUpdater
+import com.x2tora.torabox.worker.ShipmentSyncScheduler
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,7 +55,14 @@ class ToraBoxViewModel(application: Application) : AndroidViewModel(application)
     private var downloadedApkFile: File? = null
 
     init {
-        if (_state.value.settings.autoRefreshOnLaunch && _state.value.shipments.isNotEmpty()) {
+        applyAutoArchiveIfNeeded()
+        val settings = _state.value.settings
+        ShipmentSyncScheduler.syncSchedule(
+            context = application,
+            enabled = settings.backgroundSyncEnabled,
+            intervalHours = settings.backgroundSyncIntervalHours
+        )
+        if (settings.autoRefreshOnLaunch && _state.value.shipments.isNotEmpty()) {
             refreshAllActiveShipments(silent = true)
         }
     }
@@ -63,6 +73,7 @@ class ToraBoxViewModel(application: Application) : AndroidViewModel(application)
             repo.save(next)
             next
         }
+        ToraBoxWidgetUpdater.updateAllAsync(getApplication())
     }
 
     fun upsertShipment(record: ShipmentRecord) {
@@ -86,6 +97,50 @@ class ToraBoxViewModel(application: Application) : AndroidViewModel(application)
         updateAndSave { prev ->
             prev.copy(shipments = prev.shipments.filterNot { it.id == id })
         }
+    }
+
+    fun deleteShipments(ids: Set<String>) {
+        if (ids.isEmpty()) return
+        updateAndSave { prev ->
+            prev.copy(shipments = prev.shipments.filterNot { it.id in ids })
+        }
+    }
+
+    fun archiveShipments(ids: Set<String>, archived: Boolean) {
+        if (ids.isEmpty()) return
+        updateAndSave { prev ->
+            prev.copy(
+                shipments = prev.shipments.map {
+                    if (it.id in ids) it.copy(isArchived = archived) else it
+                }
+            )
+        }
+    }
+
+    fun archiveAllDelivered(): Int {
+        var count = 0
+        updateAndSave { prev ->
+            val nextList = prev.shipments.map {
+                if (!it.isArchived && it.currentPhase == StandardDeliveryPhase.DELIVERED) {
+                    count++
+                    it.copy(isArchived = true)
+                } else it
+            }
+            prev.copy(shipments = nextList)
+        }
+        return count
+    }
+
+    fun applyAutoArchiveIfNeeded(): Int {
+        val days = _state.value.settings.autoArchiveDeliveredDays
+        if (days <= 0) return 0
+        var archivedCount = 0
+        updateAndSave { prev ->
+            val (updated, count) = ShipmentMaintenance.applyAutoArchive(prev.shipments, days)
+            archivedCount = count
+            if (count > 0) prev.copy(shipments = updated) else prev
+        }
+        return archivedCount
     }
 
     fun togglePin(id: String) {
@@ -196,6 +251,7 @@ class ToraBoxViewModel(application: Application) : AndroidViewModel(application)
                     }
                 )
             }
+            applyAutoArchiveIfNeeded()
             onComplete(successCount, active.size)
         }
     }
@@ -321,29 +377,8 @@ class ToraBoxViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun applyTrackingResult(base: ShipmentRecord, tr: TrackingResult): ShipmentRecord {
-        return base.copy(
-            carrierId = tr.carrierId,
-            itemName = tr.itemName.ifBlank { base.itemName },
-            itemQuantity = tr.itemQuantity.ifBlank { base.itemQuantity },
-            senderName = tr.senderName.ifBlank { base.senderName },
-            senderPhone = tr.senderPhone.ifBlank { base.senderPhone },
-            senderAddress = tr.senderAddress.ifBlank { base.senderAddress },
-            recipientName = tr.recipientName.ifBlank { base.recipientName },
-            recipientPhone = tr.recipientPhone.ifBlank { base.recipientPhone },
-            recipientAddress = tr.recipientAddress.ifBlank { base.recipientAddress },
-            accepterName = tr.accepterName.ifBlank { base.accepterName },
-            serviceType = tr.serviceType.ifBlank { base.serviceType },
-            originWaybill = tr.originWaybill.ifBlank { base.originWaybill },
-            returnWaybill = tr.returnWaybill.ifBlank { base.returnWaybill },
-            currentStatusLabel = tr.currentStatusLabel.ifBlank { base.currentStatusLabel },
-            currentPhase = tr.currentPhase,
-            currentCarrierStageIndex = tr.currentCarrierStageIndex,
-            events = if (tr.events.isNotEmpty()) tr.events else base.events,
-            lastUpdatedEpochMs = System.currentTimeMillis(),
-            lastSyncSource = tr.syncSource
-        )
-    }
+    private fun applyTrackingResult(base: ShipmentRecord, tr: TrackingResult): ShipmentRecord =
+        ShipmentMaintenance.applyTrackingResult(base, tr)
 
     // === Settings & Backup ===
     fun updateTheme(option: ThemeOption) = updateSettings { it.copy(themeOption = option) }
@@ -353,6 +388,18 @@ class ToraBoxViewModel(application: Application) : AndroidViewModel(application)
     fun updateWideDualLayout(enabled: Boolean) = updateSettings { it.copy(wideDualLayoutEnabled = enabled) }
     fun updateAutoRefreshOnLaunch(enabled: Boolean) = updateSettings { it.copy(autoRefreshOnLaunch = enabled) }
     fun updateAutoDetectClipboard(enabled: Boolean) = updateSettings { it.copy(autoDetectClipboardWaybill = enabled) }
+    fun updateAutoArchiveDeliveredDays(days: Int) {
+        updateSettings { it.copy(autoArchiveDeliveredDays = days) }
+        applyAutoArchiveIfNeeded()
+    }
+    fun updateBackgroundSync(
+        enabled: Boolean,
+        intervalHours: Int = _state.value.settings.backgroundSyncIntervalHours
+    ) {
+        val clamped = intervalHours.coerceIn(1, 24)
+        updateSettings { it.copy(backgroundSyncEnabled = enabled, backgroundSyncIntervalHours = clamped) }
+        ShipmentSyncScheduler.syncSchedule(getApplication(), enabled, clamped)
+    }
     fun updateSweetTrackerApiKey(key: String) = updateSettings { it.copy(sweetTrackerApiKey = key.trim()) }
     fun updateCustomTrackerEndpoint(endpoint: String) = updateSettings {
         it.copy(customTrackerEndpoint = endpoint.trim().ifBlank { "https://apis.tracker.delivery" })

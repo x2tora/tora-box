@@ -1,5 +1,7 @@
 package com.x2tora.torabox.ui.screens
 
+import android.Manifest
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -89,6 +91,8 @@ fun MoreSettingsScreen(
     onUpdateWideDualLayout: (Boolean) -> Unit,
     onUpdateAutoRefreshOnLaunch: (Boolean) -> Unit,
     onUpdateAutoDetectClipboard: (Boolean) -> Unit,
+    onUpdateAutoArchiveDays: (Int) -> Unit = {},
+    onUpdateBackgroundSync: (Boolean, Int) -> Unit = { _, _ -> },
     onUpdateSweetTrackerApiKey: (String) -> Unit,
     onUpdateCustomTrackerEndpoint: (String) -> Unit,
     onLoadSampleShipments: () -> Unit,
@@ -110,6 +114,18 @@ fun MoreSettingsScreen(
     var showPasteRestoreDialog by remember { mutableStateOf(false) }
     var pendingImportBackup by remember { mutableStateOf<Pair<String, ToraBoxDataState>?>(null) }
     var showResetConfirm by remember { mutableStateOf(false) }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            onUpdateBackgroundSync(true, state.settings.backgroundSyncIntervalHours)
+            onNotify("백그라운드 배송 상태 알림이 활성화되었습니다")
+        } else {
+            onUpdateBackgroundSync(false, state.settings.backgroundSyncIntervalHours)
+            onNotify("알림 권한이 없어 백그라운드 알림을 켤 수 없습니다")
+        }
+    }
 
     val exportFileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json")
@@ -264,6 +280,61 @@ fun MoreSettingsScreen(
                         startAction = { PreferenceStartIcon(MiuixIcons.Paste, Color(0xFF0EA5E9)) }
                     )
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    SwitchPreference(
+                        title = "백그라운드 배송 알림",
+                        summary = "집하·이동·배송출발·완료 단계 변경 시 알림",
+                        checked = state.settings.backgroundSyncEnabled,
+                        onCheckedChange = { enable ->
+                            if (enable && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                !com.x2tora.torabox.notification.NotificationHelper.hasNotificationPermission(context)
+                            ) {
+                                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            } else {
+                                onUpdateBackgroundSync(enable, state.settings.backgroundSyncIntervalHours)
+                                onNotify(if (enable) "백그라운드 배송 알림이 활성화되었습니다" else "백그라운드 배송 알림을 껐습니다")
+                            }
+                        },
+                        startAction = { PreferenceStartIcon(MiuixIcons.Refresh, Color(0xFF3482FF)) }
+                    )
+                    AnimatedVisibility(
+                        visible = state.settings.backgroundSyncEnabled,
+                        enter = ToraBoxMotion.expandEnter(),
+                        exit = ToraBoxMotion.shrinkExit()
+                    ) {
+                        Column {
+                            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                            val intervals = listOf(1, 3, 6, 12)
+                            val intervalLabels = intervals.map { "${it}시간마다 자동 조회" }
+                            val selectedIntervalIndex = intervals.indexOf(state.settings.backgroundSyncIntervalHours)
+                                .takeIf { it >= 0 } ?: 1
+                            OverlayDropdownPreference(
+                                title = "자동 조회 주기",
+                                summary = intervalLabels[selectedIntervalIndex],
+                                items = intervalLabels,
+                                selectedIndex = selectedIntervalIndex,
+                                onSelectedIndexChange = { idx ->
+                                    onUpdateBackgroundSync(true, intervals[idx])
+                                },
+                                startAction = { PreferenceStartIcon(MiuixIcons.Refresh, Color(0xFF0EA5E9)) }
+                            )
+                        }
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    val archiveDaysOptions = listOf(0, 3, 7, 14)
+                    val archiveLabels = listOf("사용 안 함", "3일 후 자동 보관", "7일 후 자동 보관", "14일 후 자동 보관")
+                    val selectedArchiveIndex = archiveDaysOptions.indexOf(state.settings.autoArchiveDeliveredDays)
+                        .takeIf { it >= 0 } ?: 0
+                    OverlayDropdownPreference(
+                        title = "배송완료 자동 보관",
+                        summary = archiveLabels[selectedArchiveIndex],
+                        items = archiveLabels,
+                        selectedIndex = selectedArchiveIndex,
+                        onSelectedIndexChange = { idx ->
+                            onUpdateAutoArchiveDays(archiveDaysOptions[idx])
+                        },
+                        startAction = { PreferenceStartIcon(MiuixIcons.Layers, Color(0xFF16A34A)) }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                     ArrowPreference(
                         title = "스마트택배 API 키 (선택)",
                         summary = if (state.settings.sweetTrackerApiKey.isBlank()) {
@@ -342,7 +413,7 @@ fun MoreSettingsScreen(
                     )
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                     BasicComponent(
-                        title = "ToraBox (x2tora/tora-box)",
+                        title = "토라박스 (x2tora/tora-box)",
                         summary = "v${BuildConfig.VERSION_NAME}",
                         startAction = { PreferenceStartIcon(MiuixIcons.Info, Color(0xFF64748B)) }
                     )

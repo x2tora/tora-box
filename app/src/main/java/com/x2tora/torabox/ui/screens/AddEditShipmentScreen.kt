@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -90,6 +91,11 @@ import java.util.UUID
 fun AddEditShipmentScreen(
     prefillWaybill: String?,
     prefillCarrierId: String?,
+    prefillItemName: String? = null,
+    prefillSenderName: String? = null,
+    scannedWaybill: String? = null,
+    onConsumeScannedWaybill: () -> Unit = {},
+    onOpenScanner: (() -> Unit)? = null,
     isProbing: Boolean,
     toastState: StackedToastState,
     onProbePreview: (waybill: String, carrierId: String?, onResult: (Result<TrackingResult>) -> Unit) -> Unit,
@@ -109,9 +115,16 @@ fun AddEditShipmentScreen(
     var waybillInput by remember { mutableStateOf(prefillWaybill.orEmpty()) }
     var selectedCarrierId by remember { mutableStateOf(prefillCarrierId) }
     var customTitle by remember { mutableStateOf("") }
-    var itemName by remember { mutableStateOf("") }
+    var itemName by remember { mutableStateOf(prefillItemName.orEmpty()) }
     var itemQuantity by remember { mutableStateOf("") }
-    var senderName by remember { mutableStateOf("") }
+    var senderName by remember { mutableStateOf(prefillSenderName.orEmpty()) }
+
+    LaunchedEffect(scannedWaybill) {
+        if (!scannedWaybill.isNullOrBlank()) {
+            waybillInput = scannedWaybill
+            onConsumeScannedWaybill()
+        }
+    }
     var senderPhone by remember { mutableStateOf("") }
     var senderAddress by remember { mutableStateOf("") }
     var recipientName by remember { mutableStateOf("") }
@@ -302,6 +315,21 @@ fun AddEditShipmentScreen(
                                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                                             modifier = Modifier.weight(1f)
                                         )
+                                        if (onOpenScanner != null) {
+                                            IconButton(
+                                                onClick = {
+                                                    focusManager.clearFocus()
+                                                    onOpenScanner()
+                                                },
+                                                modifier = Modifier.size(38.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = MiuixIcons.Scan,
+                                                    contentDescription = "바코드 스캔",
+                                                    tint = MiuixTheme.colorScheme.primary
+                                                )
+                                            }
+                                        }
                                         SquirclePillBadge(
                                             text = "붙여넣기",
                                             backgroundColor = MiuixTheme.colorScheme.surfaceContainerHigh,
@@ -463,31 +491,31 @@ fun AddEditShipmentScreen(
                     .navigationBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 24.dp)
             )
+
+            if (showCarrierPicker) {
+                CarrierPickerSheet(
+                    selectedCarrierId = selectedCarrierId,
+                    onDismiss = { showCarrierPicker = false },
+                    onSelect = { c ->
+                        selectedCarrierId = c.id
+                        iconKey = c.iconKey
+                        colorHex = c.accentColorHex
+                        showCarrierPicker = false
+                    }
+                )
+            }
+
+            ConfirmActionDialog(
+                show = showDiscardConfirm,
+                title = "작성 취소",
+                summary = "입력 중인 송장 정보를 저장하지 않고 나가시겠습니까?",
+                confirmText = "나가기",
+                isDestructive = true,
+                onDismiss = { showDiscardConfirm = false },
+                onConfirm = onBack
+            )
         }
     }
-
-    if (showCarrierPicker) {
-        CarrierPickerSheet(
-            selectedCarrierId = selectedCarrierId,
-            onDismiss = { showCarrierPicker = false },
-            onSelect = { c ->
-                selectedCarrierId = c.id
-                iconKey = c.iconKey
-                colorHex = c.accentColorHex
-                showCarrierPicker = false
-            }
-        )
-    }
-
-    ConfirmActionDialog(
-        show = showDiscardConfirm,
-        title = "작성 취소",
-        summary = "입력 중인 송장 정보를 저장하지 않고 나가시겠습니까?",
-        confirmText = "나가기",
-        isDestructive = true,
-        onDismiss = { showDiscardConfirm = false },
-        onConfirm = onBack
-    )
 }
 
 @Composable

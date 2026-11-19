@@ -146,7 +146,7 @@ fun AppUpdateDialog(
                 is AppUpdatePhase.ReadyToInstall -> {
                     Text(
                         text = if (activePhase.needsPermission) {
-                            "보안 설정에서 'ToraBox'의 출처를 알 수 없는 앱 설치 권한을 허용한 뒤 [설치 실행]을 눌러 주세요."
+                            "보안 설정에서 '토라박스'의 출처를 알 수 없는 앱 설치 권한을 허용한 뒤 [설치 실행]을 눌러 주세요."
                         } else {
                             "업데이트 파일 다운로드가 완료되었습니다. 설치 화면이 열리지 않으면 아래 [설치 실행]을 눌러 주세요."
                         },
