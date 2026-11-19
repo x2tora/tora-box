@@ -24,3 +24,24 @@
 
 -dontwarn top.yukonga.miuix.**
 -dontwarn kotlinx.serialization.**
+
+# WorkManager & Room (R8 full mode strips reflective WorkDatabase_Impl / Initializer constructors)
+-keep class * extends androidx.room.RoomDatabase { <init>(); }
+-keep class androidx.work.impl.WorkDatabase_Impl { *; }
+-keep class * extends androidx.work.ListenableWorker {
+    public <init>(android.content.Context, androidx.work.WorkerParameters);
+}
+-keep class * extends androidx.startup.Initializer { <init>(); }
+
+# ML Kit ComponentDiscovery & Barcode Scanning
+-keep class * implements com.google.firebase.components.ComponentRegistrar { <init>(); }
+-keep class com.google.mlkit.** { *; }
+-dontwarn com.google.mlkit.**
+
+# CameraX DefaultProvider
+-keep class androidx.camera.camera2.Camera2Config$DefaultProvider { <init>(); }
+-keep class * implements androidx.camera.core.CameraXConfig$Provider { <init>(); }
+
+# Glance AppWidget & ActionCallback
+-keep class com.x2tora.torabox.widget.** { *; }
+-keep class * extends androidx.glance.appwidget.action.ActionCallback { <init>(); }
