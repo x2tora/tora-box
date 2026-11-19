@@ -302,7 +302,8 @@ fun MainScaffoldScreen(
                         doorLockHint = state.settings.doorLockHint,
                         onUpdateGroupTag = viewModel::updateGroupTag,
                         onAddPhotoUri = viewModel::addPhotoUri,
-                        onRemovePhotoUri = viewModel::removePhotoUri
+                        onRemovePhotoUri = viewModel::removePhotoUri,
+                        onToggleLiveUpdate = viewModel::toggleLiveUpdatePin
                     )
                 }
 
@@ -1032,6 +1033,7 @@ private fun SettingsScreenHost(
                     onUpdateAutoDetectClipboard = viewModel::updateAutoDetectClipboard,
                     onUpdateAutoArchiveDays = viewModel::updateAutoArchiveDeliveredDays,
                     onUpdateBackgroundSync = viewModel::updateBackgroundSync,
+                    onUpdateLiveUpdatesEnabled = viewModel::updateLiveUpdatesEnabled,
                     onUpdateAutoCaptureNotifications = viewModel::updateAutoCaptureNotifications,
                     onUpdateAutoCaptureRegisterImmediately = viewModel::updateAutoCaptureRegisterImmediately,
                     onUpdateQuietHours = viewModel::updateQuietHours,

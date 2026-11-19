@@ -40,6 +40,7 @@ import com.x2tora.torabox.model.SwipeActionOption
 import com.x2tora.torabox.model.ThemeColorStyle
 import com.x2tora.torabox.model.ThemeOption
 import com.x2tora.torabox.model.ToraBoxDataState
+import com.x2tora.torabox.notification.LiveUpdateNotificationManager
 import com.x2tora.torabox.notification.ToraBoxNotificationListenerService
 import com.x2tora.torabox.security.BiometricAuthHelper
 import com.x2tora.torabox.ui.components.AppUpdateUiState
@@ -98,6 +99,7 @@ fun MoreSettingsScreen(
     onUpdateAutoDetectClipboard: (Boolean) -> Unit,
     onUpdateAutoArchiveDays: (Int) -> Unit = {},
     onUpdateBackgroundSync: (Boolean, Int) -> Unit = { _, _ -> },
+    onUpdateLiveUpdatesEnabled: (Boolean) -> Unit = {},
     onUpdateAutoCaptureNotifications: (Boolean) -> Unit = {},
     onUpdateAutoCaptureRegisterImmediately: (Boolean) -> Unit = {},
     onUpdateQuietHours: (Boolean, Int, Int) -> Unit = { _, _, _ -> },
@@ -439,6 +441,32 @@ fun MoreSettingsScreen(
                         onCheckedChange = onUpdateNotifyAnomalies,
                         startAction = { PreferenceStartIcon(MiuixIcons.Info, Color(0xFFEF4444)) }
                     )
+                    if (LiveUpdateNotificationManager.isSupported()) {
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                        SwitchPreference(
+                            title = "상태바·잠금화면 Live Updates (Android 16+)",
+                            summary = "배송출발·고정 배송을 상태바 칩과 6단계 진행바로 실시간 표시",
+                            checked = state.settings.liveUpdatesEnabled,
+                            onCheckedChange = { enable ->
+                                if (enable && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                    !com.x2tora.torabox.notification.NotificationHelper.hasNotificationPermission(context)
+                                ) {
+                                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                }
+                                onUpdateLiveUpdatesEnabled(enable)
+                            },
+                            startAction = { PreferenceStartIcon(MiuixIcons.Refresh, Color(0xFFF97316)) }
+                        )
+                        if (state.settings.liveUpdatesEnabled && !LiveUpdateNotificationManager.canPostPromoted(context)) {
+                            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                            ArrowPreference(
+                                title = "승격 알림(Live Updates) 시스템 허용",
+                                summary = "상태바 칩 노출을 위해 시스템 설정에서 승격 알림을 허용해 주세요",
+                                onClick = { LiveUpdateNotificationManager.openPromotionSettings(context) },
+                                startAction = { PreferenceStartIcon(MiuixIcons.Info, Color(0xFFF59E0B)) }
+                            )
+                        }
+                    }
                 }
             }
 

@@ -48,5 +48,6 @@
 
 # NotificationListenerService & Security
 -keep class com.x2tora.torabox.notification.ToraBoxNotificationListenerService { *; }
+-keep class com.x2tora.torabox.notification.LiveUpdateActionReceiver { *; }
 -keep class com.x2tora.torabox.security.** { *; }
 -dontwarn androidx.biometric.**

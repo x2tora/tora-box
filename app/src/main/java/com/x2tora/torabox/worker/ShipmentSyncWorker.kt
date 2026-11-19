@@ -15,6 +15,7 @@ import com.x2tora.torabox.domain.KoreanCarrierCatalog
 import com.x2tora.torabox.domain.ParcelTrackingEngine
 import com.x2tora.torabox.domain.ShipmentMaintenance
 import com.x2tora.torabox.model.StandardDeliveryPhase
+import com.x2tora.torabox.notification.LiveUpdateNotificationManager
 import com.x2tora.torabox.notification.NotificationHelper
 import com.x2tora.torabox.notification.PhaseChangeNotice
 import com.x2tora.torabox.widget.ToraBoxWidgetUpdater
@@ -90,6 +91,7 @@ class ShipmentSyncWorker(
         )
         repo.save(initialState.copy(shipments = finalShipments))
         ToraBoxWidgetUpdater.updateAll(applicationContext)
+        LiveUpdateNotificationManager.syncLiveUpdates(applicationContext, finalShipments, settings)
         if (settings.backgroundSyncEnabled && phaseChanges.isNotEmpty()) {
             NotificationHelper.notifyPhaseChanges(applicationContext, phaseChanges, settings)
         }

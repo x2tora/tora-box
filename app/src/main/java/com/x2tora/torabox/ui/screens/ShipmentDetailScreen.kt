@@ -42,6 +42,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.x2tora.torabox.domain.KoreanCarrierCatalog
 import com.x2tora.torabox.model.ShipmentRecord
+import com.x2tora.torabox.model.StandardDeliveryPhase
+import com.x2tora.torabox.notification.LiveUpdateNotificationManager
 import com.x2tora.torabox.ui.components.CarrierStageStepper
 import com.x2tora.torabox.ui.components.ConfirmActionDialog
 import com.x2tora.torabox.ui.components.EmptyDataBanner
@@ -103,7 +105,8 @@ fun ShipmentDetailScreen(
     doorLockHint: String = "",
     onUpdateGroupTag: (String, String) -> Unit = { _, _ -> },
     onAddPhotoUri: (String, String) -> Unit = { _, _ -> },
-    onRemovePhotoUri: (String, String) -> Unit = { _, _ -> }
+    onRemovePhotoUri: (String, String) -> Unit = { _, _ -> },
+    onToggleLiveUpdate: (String) -> Unit = {}
 ) {
     if (shipment == null) {
         LaunchedEffectOnMissing(onBack)
@@ -380,6 +383,29 @@ fun ShipmentDetailScreen(
                                                 onNotify(if (shipment.isPinned) "고정을 해제했습니다" else "홈 상단에 고정했습니다")
                                             }
                                         )
+                                        if (LiveUpdateNotificationManager.isSupported() &&
+                                            !shipment.isArchived &&
+                                            shipment.currentPhase != StandardDeliveryPhase.DELIVERED
+                                        ) {
+                                            val liveActive = shipment.isLiveUpdatePinned ||
+                                                shipment.currentPhase == StandardDeliveryPhase.OUT_FOR_DELIVERY
+                                            SquirclePillBadge(
+                                                text = if (shipment.isLiveUpdatePinned) "실시간 알림 중" else "실시간 알림 고정",
+                                                backgroundColor = if (liveActive) {
+                                                    MiuixTheme.colorScheme.primary.copy(alpha = 0.14f)
+                                                } else MiuixTheme.colorScheme.surfaceContainerHigh,
+                                                contentColor = if (liveActive) {
+                                                    MiuixTheme.colorScheme.primary
+                                                } else MiuixTheme.colorScheme.onSurface,
+                                                onClick = {
+                                                    onToggleLiveUpdate(shipment.id)
+                                                    onNotify(
+                                                        if (shipment.isLiveUpdatePinned) "실시간 알림 고정을 해제했습니다"
+                                                        else "상태바·잠금화면 Live Update로 고정했습니다"
+                                                    )
+                                                }
+                                            )
+                                        }
                                         SquirclePillBadge(
                                             text = if (shipment.isArchived) "보관 해제" else "보관함 이동",
                                             backgroundColor = MiuixTheme.colorScheme.surfaceContainerHigh,

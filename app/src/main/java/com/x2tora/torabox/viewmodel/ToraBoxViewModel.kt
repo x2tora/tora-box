@@ -21,6 +21,7 @@ import com.x2tora.torabox.model.ThemeColorStyle
 import com.x2tora.torabox.model.ThemeOption
 import com.x2tora.torabox.model.ToraBoxDataState
 import com.x2tora.torabox.model.TrackingResult
+import com.x2tora.torabox.notification.LiveUpdateNotificationManager
 import com.x2tora.torabox.ui.components.AppUpdatePhase
 import com.x2tora.torabox.ui.components.AppUpdateUiState
 import com.x2tora.torabox.update.AppUpdater
@@ -66,6 +67,11 @@ class ToraBoxViewModel(application: Application) : AndroidViewModel(application)
             enabled = settings.backgroundSyncEnabled,
             intervalHours = settings.backgroundSyncIntervalHours
         )
+        LiveUpdateNotificationManager.syncLiveUpdates(
+            context = application,
+            shipments = _state.value.shipments,
+            settings = settings
+        )
         if (settings.autoRefreshOnLaunch && _state.value.shipments.isNotEmpty()) {
             refreshAllActiveShipments(silent = true)
         }
@@ -77,7 +83,9 @@ class ToraBoxViewModel(application: Application) : AndroidViewModel(application)
             repo.save(next)
             next
         }
+        val latest = _state.value
         ToraBoxWidgetUpdater.updateAllAsync(getApplication())
+        LiveUpdateNotificationManager.syncLiveUpdates(getApplication(), latest.shipments, latest.settings)
     }
 
     fun upsertShipment(record: ShipmentRecord) {
@@ -165,6 +173,20 @@ class ToraBoxViewModel(application: Application) : AndroidViewModel(application)
                 }
             )
         }
+    }
+
+    fun toggleLiveUpdatePin(id: String) {
+        updateAndSave { prev ->
+            prev.copy(
+                shipments = prev.shipments.map {
+                    if (it.id == id) it.copy(isLiveUpdatePinned = !it.isLiveUpdatePinned) else it
+                }
+            )
+        }
+    }
+
+    fun updateLiveUpdatesEnabled(enabled: Boolean) = updateSettings {
+        it.copy(liveUpdatesEnabled = enabled)
     }
 
     fun loadSampleShipments() {
