@@ -234,7 +234,7 @@ fun MoreSettingsScreen(
                             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                             ArrowPreference(
                                 title = "커스텀 포인트 색상 지정",
-                                summary = "현재 ${formatRgbHex(previewHex)} 적용 중",
+                                summary = "현재 ${formatRgbHex(previewHex)} 적용 중 · 탭하여 변경",
                                 onClick = { showAppColorDialog = true },
                                 startAction = {
                                     Box(
@@ -583,7 +583,7 @@ fun MoreSettingsScreen(
                     )
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                     BasicComponent(
-                        title = "토라박스 (x2tora/tora-box)",
+                        title = "ToraBox",
                         summary = "v${BuildConfig.VERSION_NAME}",
                         startAction = { PreferenceStartIcon(MiuixIcons.Info, Color(0xFF64748B)) }
                     )

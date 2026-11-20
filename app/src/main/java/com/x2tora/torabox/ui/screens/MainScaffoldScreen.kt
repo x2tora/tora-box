@@ -671,37 +671,49 @@ private fun MainTabsHost(
             }
 
             // ② Floating Island Top Bar
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .onSizeChanged {
-                        if (it.height > 0) {
-                            val measured = with(density) { it.height.toDp() }
-                            if (measured > 0.dp) measuredTopBarHeightDp = measured
-                        }
-                    }
+            AnimatedVisibility(
+                visible = true,
+                enter = slideInVertically(
+                    animationSpec = ToraBoxMotion.OffsetSpring,
+                    initialOffsetY = { -it }
+                ) + fadeIn(tween(320)),
+                exit = slideOutVertically(
+                    animationSpec = ToraBoxMotion.ExitOffsetSpring,
+                    targetOffsetY = { -it }
+                ) + fadeOut(tween(240)),
+                modifier = Modifier.align(Alignment.TopCenter)
             ) {
-                MiuixFloatingScrollTopBar(
-                    title = tabTitles[selectedTab],
-                    scrollBehavior = activeScrollBehavior,
-                    backdrop = barBackdrop,
-                    maxContentWidth = if (state.settings.wideDualLayoutEnabled) Dp.Unspecified else 620.dp,
-                    actions = {
-                        IconButton(
-                            onClick = {
-                                showQuickMenu = false
-                                onOpenSettings()
-                            },
-                            modifier = Modifier.size(48.dp)
-                        ) {
-                            Icon(
-                                imageVector = MiuixIcons.Regular.Settings,
-                                contentDescription = "설정 및 백업",
-                                tint = MiuixTheme.colorScheme.onSurface
-                            )
+                Box(
+                    modifier = Modifier
+                        .onSizeChanged {
+                            if (it.height > 0) {
+                                val measured = with(density) { it.height.toDp() }
+                                if (measured > 0.dp) measuredTopBarHeightDp = measured
+                            }
                         }
-                    }
-                )
+                ) {
+                    MiuixFloatingScrollTopBar(
+                        title = tabTitles[selectedTab],
+                        scrollBehavior = activeScrollBehavior,
+                        backdrop = barBackdrop,
+                        maxContentWidth = if (state.settings.wideDualLayoutEnabled) Dp.Unspecified else 620.dp,
+                        actions = {
+                            IconButton(
+                                onClick = {
+                                    showQuickMenu = false
+                                    onOpenSettings()
+                                },
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(
+                                    imageVector = MiuixIcons.Regular.Settings,
+                                    contentDescription = "설정 및 백업",
+                                    tint = MiuixTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    )
+                }
             }
 
             // ③ Quick-add dim scrim below nav bar
@@ -720,12 +732,26 @@ private fun MainTabsHost(
             }
 
             // ④ Bottom edge blur + Nav Bar (outside barBackdrop!)
-            Box(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
-                MiuixBottomEdgeBlur(
-                    backdrop = barBackdrop,
-                    extraHeight = 68.dp,
-                    modifier = Modifier.align(Alignment.BottomCenter)
-                )
+            AnimatedVisibility(
+                visible = true,
+                enter = slideInVertically(
+                    animationSpec = ToraBoxMotion.OffsetSpring,
+                    initialOffsetY = { it }
+                ) + fadeIn(tween(320)),
+                exit = slideOutVertically(
+                    animationSpec = ToraBoxMotion.ExitOffsetSpring,
+                    targetOffsetY = { it }
+                ) + fadeOut(tween(240)),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+            ) {
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    MiuixBottomEdgeBlur(
+                        backdrop = barBackdrop,
+                        extraHeight = 72.dp,
+                        modifier = Modifier.align(Alignment.BottomCenter)
+                    )
 
                 if (isLiquidGlassNav) {
                     FloatingLiquidGlassNavBar(
@@ -795,7 +821,7 @@ private fun MainTabsHost(
                                     if (selectedTab != 1) clearSelection()
                                     selectedTab = 1
                                 },
-                                icon = MiuixIcons.Scan,
+                                icon = MiuixIcons.Regular.Scan,
                                 label = "추측"
                             )
 
@@ -854,7 +880,7 @@ private fun MainTabsHost(
                                     if (selectedTab != 2) clearSelection()
                                     selectedTab = 2
                                 },
-                                icon = MiuixIcons.ListView,
+                                icon = MiuixIcons.Regular.ListView,
                                 label = "택배사"
                             )
                             NavigationBarItem(
@@ -864,11 +890,12 @@ private fun MainTabsHost(
                                     if (selectedTab != 3) clearSelection()
                                     selectedTab = 3
                                 },
-                                icon = MiuixIcons.Folder,
+                                icon = MiuixIcons.Regular.Folder,
                                 label = "보관함"
                             )
                         }
                     }
+                }
                 }
             }
 
@@ -1253,7 +1280,7 @@ private fun QuickAddMorphActionRow(
             imageVector = icon,
             contentDescription = title,
             tint = iconTint,
-            modifier = Modifier.size(24.dp)
+            modifier = Modifier.size(26.dp)
         )
         Column(
             modifier = Modifier.weight(1f),

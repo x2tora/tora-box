@@ -11,9 +11,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -224,9 +227,12 @@ fun HomeScreen(
         }
     }
 
+    val navBottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val bottomPad = maxOf(bottomBarExtraPadding + 20.dp, 116.dp + navBottomInset)
+
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val isDualColumn = wideDualEnabled && maxWidth >= 600.dp
-        val sidePad = if (isDualColumn) 20.dp else ((maxWidth - 600.dp) / 2f).coerceAtLeast(16.dp)
+        val sidePad = if (isDualColumn) 20.dp else ((maxWidth - 600.dp) / 2f).coerceAtLeast(20.dp)
 
         LazyColumn(
             state = listState,
@@ -238,7 +244,7 @@ fun HomeScreen(
                 start = sidePad,
                 end = sidePad,
                 top = topInset + 8.dp,
-                bottom = bottomBarExtraPadding + 20.dp
+                bottom = bottomPad
             ),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
@@ -739,7 +745,7 @@ fun HomeScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .animateItem(),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        horizontalArrangement = Arrangement.spacedBy(20.dp)
                     ) {
                         pair.forEach { item ->
                             val rightOpt = state.settings.swipeRightAction

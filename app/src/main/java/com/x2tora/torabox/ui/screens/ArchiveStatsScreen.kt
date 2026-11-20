@@ -7,16 +7,20 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import com.x2tora.torabox.domain.DeliveryIntelligence
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -40,6 +44,7 @@ import com.x2tora.torabox.ui.components.EmptyDataBanner
 import com.x2tora.torabox.ui.components.SelectionActionBar
 import com.x2tora.torabox.ui.components.ShipmentSummaryCard
 import com.x2tora.torabox.ui.components.SquirclePillBadge
+import com.x2tora.torabox.ui.theme.LocalWideDualLayoutEnabled
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
@@ -117,22 +122,15 @@ fun ArchiveStatsScreen(
         }.sortedByDescending { maxOf(it.lastUpdatedEpochMs, it.createdAtEpochMs) }
     }
 
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val sidePad = ((maxWidth - 600.dp) / 2f).coerceAtLeast(16.dp)
+    val wideDualEnabled = LocalWideDualLayoutEnabled.current
+    val navBottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val bottomPad = maxOf(bottomBarExtraPadding + 20.dp, 116.dp + navBottomInset)
 
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .overScrollVertical()
-                .nestedScroll(scrollBehavior.nestedScrollConnection),
-            contentPadding = PaddingValues(
-                start = sidePad,
-                end = sidePad,
-                top = topInset + 8.dp,
-                bottom = bottomBarExtraPadding + 20.dp
-            ),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val isDualColumn = wideDualEnabled && maxWidth >= 600.dp
+        val singleSidePad = ((maxWidth - 600.dp) / 2f).coerceAtLeast(20.dp)
+
+        val summaryLeftContent: LazyListScope.() -> Unit = {
             item(key = "stats_card") {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -274,7 +272,9 @@ fun ArchiveStatsScreen(
                     }
                 }
             }
+        }
 
+        val archiveRightContent: LazyListScope.() -> Unit = {
             if (isSelectionMode) {
                 item(key = "archive_selection_bar") {
                     val visibleIds = remember(filtered) { filtered.map { it.id } }
@@ -324,6 +324,53 @@ fun ArchiveStatsScreen(
                         modifier = Modifier.animateItem()
                     )
                 }
+            }
+        }
+
+        if (isDualColumn) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(20.dp)
+            ) {
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .overScrollVertical()
+                        .nestedScroll(scrollBehavior.nestedScrollConnection),
+                    contentPadding = PaddingValues(top = topInset + 8.dp, bottom = bottomPad),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    content = summaryLeftContent
+                )
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .overScrollVertical()
+                        .nestedScroll(scrollBehavior.nestedScrollConnection),
+                    contentPadding = PaddingValues(top = topInset + 8.dp, bottom = bottomPad),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    content = archiveRightContent
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .overScrollVertical()
+                    .nestedScroll(scrollBehavior.nestedScrollConnection),
+                contentPadding = PaddingValues(
+                    start = singleSidePad,
+                    end = singleSidePad,
+                    top = topInset + 8.dp,
+                    bottom = bottomPad
+                ),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                summaryLeftContent()
+                archiveRightContent()
             }
         }
     }

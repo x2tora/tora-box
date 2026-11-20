@@ -11,12 +11,17 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -39,6 +44,7 @@ import com.x2tora.torabox.ui.components.CarrierStageStepper
 import com.x2tora.torabox.ui.components.EmptyDataBanner
 import com.x2tora.torabox.ui.components.MiuixGlassIcon
 import com.x2tora.torabox.ui.components.SquirclePillBadge
+import com.x2tora.torabox.ui.theme.LocalWideDualLayoutEnabled
 import com.x2tora.torabox.ui.theme.ToraBoxIconCatalog
 import com.x2tora.torabox.ui.theme.ToraBoxMotion
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -83,22 +89,15 @@ fun SmartDetectScreen(
         extracted.carrierHintId?.let { KoreanCarrierCatalog.findById(it) }
     }
 
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val sidePad = ((maxWidth - 600.dp) / 2f).coerceAtLeast(16.dp)
+    val wideDualEnabled = LocalWideDualLayoutEnabled.current
+    val navBottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val bottomPad = maxOf(bottomBarExtraPadding + 20.dp, 116.dp + navBottomInset)
 
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .overScrollVertical()
-                .nestedScroll(scrollBehavior.nestedScrollConnection),
-            contentPadding = PaddingValues(
-                start = sidePad,
-                end = sidePad,
-                top = topInset + 8.dp,
-                bottom = bottomBarExtraPadding + 20.dp
-            ),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val isDualColumn = wideDualEnabled && maxWidth >= 600.dp
+        val singleSidePad = ((maxWidth - 600.dp) / 2f).coerceAtLeast(20.dp)
+
+        val inputContent: LazyListScope.() -> Unit = {
             item(key = "analyzer_input") {
                 Card(
                     modifier = Modifier
@@ -212,7 +211,9 @@ fun SmartDetectScreen(
                     }
                 }
             }
+        }
 
+        val recommendationsContent: LazyListScope.() -> Unit = {
             if (recommendations.isNotEmpty()) {
                 item(key = "rec_header") {
                     SmallTitle(text = "자릿수 · 체크섬 · 대역 기반 추천 (${recommendations.size}개 후보)")
@@ -313,6 +314,53 @@ fun SmartDetectScreen(
                         subtitle = "12자리(CJ·롯데·한진 Mod-7 체크섬), 13자리(우체국·대신·경동·UPU S10), 11자리(로젠), 14자리(쿠팡 CLS), 직구 송장(LP/1Z)을 자동으로 분석해 추천합니다."
                     )
                 }
+            }
+        }
+
+        if (isDualColumn) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(20.dp)
+            ) {
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .overScrollVertical()
+                        .nestedScroll(scrollBehavior.nestedScrollConnection),
+                    contentPadding = PaddingValues(top = topInset + 8.dp, bottom = bottomPad),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    content = inputContent
+                )
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .overScrollVertical()
+                        .nestedScroll(scrollBehavior.nestedScrollConnection),
+                    contentPadding = PaddingValues(top = topInset + 8.dp, bottom = bottomPad),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    content = recommendationsContent
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .overScrollVertical()
+                    .nestedScroll(scrollBehavior.nestedScrollConnection),
+                contentPadding = PaddingValues(
+                    start = singleSidePad,
+                    end = singleSidePad,
+                    top = topInset + 8.dp,
+                    bottom = bottomPad
+                ),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                inputContent()
+                recommendationsContent()
             }
         }
     }

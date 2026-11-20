@@ -351,10 +351,10 @@ fun FloatingLiquidGlassNavBar(
     val slots = remember {
         listOf(
             NavSlot(0, 0, MiuixIcons.Regular.Home, "배송"),
-            NavSlot(1, 1, MiuixIcons.Scan, "추측"),
+            NavSlot(1, 1, MiuixIcons.Regular.Scan, "추측"),
             NavSlot(2, null, MiuixIcons.Add, "등록"),
-            NavSlot(3, 2, MiuixIcons.ListView, "택배사"),
-            NavSlot(4, 3, MiuixIcons.Folder, "보관함")
+            NavSlot(3, 2, MiuixIcons.Regular.ListView, "택배사"),
+            NavSlot(4, 3, MiuixIcons.Regular.Folder, "보관함")
         )
     }
 
